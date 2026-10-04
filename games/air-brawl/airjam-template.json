@@ -1,0 +1,17 @@
+{
+  "id": "air-brawl",
+  "name": "Air Brawl",
+  "description": "Original party platform fighter for up to 8 players with phones as controllers. Percent damage, blast zones, stocks, 4 fighters, 3 stages, and bots.",
+  "category": "arcade",
+  "scaffold": false,
+  "export": {
+    "exclude": [
+      ".airjam",
+      "dist",
+      "dist-ssr",
+      "node_modules",
+      "coverage",
+      "tsconfig.tsbuildinfo"
+    ]
+  }
+}

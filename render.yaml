@@ -1,0 +1,31 @@
+# Render Blueprint for Air Brawl: realtime Air Jam server (Docker) + static game site.
+services:
+  - type: web
+    name: air-brawl-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./packages/server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    envVars:
+      - key: AIR_JAM_AUTH_MODE
+        value: disabled
+      - key: AIR_JAM_ALLOWED_ORIGINS
+        value: "*"
+
+  - type: web
+    name: air-brawl
+    runtime: static
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter air-brawl... build
+    staticPublishPath: ./games/air-brawl/dist
+    envVars:
+      - key: VITE_AIR_JAM_SERVER_URL
+        value: https://air-brawl-server.onrender.com
+      - key: VITE_AIR_JAM_APP_ID
+        value: air-brawl
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
