@@ -48,10 +48,20 @@ One `createAirJamStore` (`src/game/session/store.ts`), kept small: phase, settin
 
 ## Renderer
 
-* **three.js** scene: perspective camera (27° FOV, slight pitch and parallax drift), per-stage procedural 3D scenery and lights, shadow-mapped key light that follows the action, ACES tone-mapping, bloom + colour grade + impact aberration/zoom-blur post stack, instanced billboard particles (two draws).
-* **Fighters** are articulated procedural models (2-bone limbs, spring chains for scarves/tails/capes, squash and lean, strike lunge, 3/4 turn). Pose logic (`pose.ts`) is pure and driven by sim state.
-* **Overlay**: a transparent Pixi canvas draws the HUD, tags, off-screen markers, announcer and debug overlay, projected through the 3D camera.
-* **Adaptive quality** steps down (resolution → bloom → shadows → lower res) when frames stay over budget, and reduced-effects mode forces the lower tiers.
+* **three.js** scene: perspective camera (32° FOV, slight pitch and parallax drift), per-stage procedural 3D scenery
+  (`stage-proving.ts`, `stage-skyline.ts`, `stage-foundry.ts` on the shared `stage-common.ts` / `proc-tex.ts` toolkit),
+  a shadow-mapped key light that follows the action, ACES tone-mapping, per-stage `StageLook` (exposure, bloom,
+  colour grade) and a sky-derived PMREM reflection environment, plus a bloom + grade + impact aberration/zoom-blur
+  post stack and instanced billboard particles (two draws).
+* **Fighters** are articulated procedural models: continuous two-bone **skinned limbs** with material bands for armor,
+  a decoupled pelvis/chest/head chain, spring chains for scarves/tails/capes, expressive faces. Pose logic (`anim.ts`)
+  is pure and driven by sim state: authored targets per state → per-channel spring layer → pose; the striking limb
+  snaps to the live hitbox. Per-fighter `StyleProfile`s give each character its own motion language.
+* **Overlay**: a transparent Pixi canvas draws the HUD (with vector fighter portraits), tags, off-screen markers,
+  announcer and debug overlay, projected through the 3D camera.
+* **Adaptive quality** steps down (resolution → bloom → shadows → lower res, hiding fine detail) when frames stay over
+  budget; geometry detail also scales with roster size. `?quality=N` pins a level; `window.__airBrawlStats()` returns
+  draw calls / triangles for profiling.
 
 ## Agents
 

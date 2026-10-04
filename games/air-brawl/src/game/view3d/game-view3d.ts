@@ -24,6 +24,7 @@ import {
   TorusGeometry,
   Vector3,
   WebGLRenderer,
+  type WebGLRenderTarget,
 } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { ITEMS } from "../data/items";
@@ -33,6 +34,7 @@ import { Camera } from "../view/camera";
 import { HudView, type HudOptions, type ScreenCamera } from "../view/hud";
 import { hexToNumber, slotStyle } from "../view/palette";
 import { createTextures } from "../view/textures";
+import { setSegScale } from "./geo";
 import { FighterModel } from "./fighter-model";
 import { Fx3D } from "./fx3d";
 import { PostStack } from "./post";
@@ -52,7 +54,7 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   debug: false,
 };
 
-const FOV = 27;
+const FOV = 32;
 const FX_COLOR: Record<HitFx, number> = {
   impact: 0xffffff,
   slash: 0xbfe9ff,
@@ -77,43 +79,46 @@ class Projector implements ScreenCamera {
   }
 }
 
-/** Additive sword-arc ribbon that follows a live hitbox. */
+/** Additive swing smear that follows a live hitbox: soft edges, hot centre, tapered tail. */
 class Ribbon {
   readonly mesh: Mesh;
   private readonly geo = new BufferGeometry();
   private readonly pos: Float32Array;
   private readonly col: Float32Array;
   readonly points: { x: number; y: number }[] = [];
-  private static readonly N = 9;
+  static readonly N = 13;
 
   constructor() {
     const n = Ribbon.N;
-    this.pos = new Float32Array(n * 2 * 3);
-    this.col = new Float32Array(n * 2 * 4);
+    this.pos = new Float32Array(n * 3 * 3);
+    this.col = new Float32Array(n * 3 * 4);
     this.geo.setAttribute("position", new BufferAttribute(this.pos, 3).setUsage(35048));
     this.geo.setAttribute("color", new BufferAttribute(this.col, 4).setUsage(35048));
     const idx: number[] = [];
     for (let i = 0; i < n - 1; i += 1) {
-      const a = i * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      const a = i * 3;
+      const b = (i + 1) * 3;
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
+      idx.push(a + 1, a + 2, b + 1, a + 2, b + 2, b + 1);
     }
     this.geo.setIndex(idx);
     this.mesh = new Mesh(
       this.geo,
-      new MeshBasicMaterial({ vertexColors: true, transparent: true, blending: AdditiveBlending, depthWrite: false, side: DoubleSide }),
+      new MeshBasicMaterial({ vertexColors: true, transparent: true, blending: AdditiveBlending, depthWrite: false, side: DoubleSide, fog: false }),
     );
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 7;
     this.mesh.visible = false;
   }
 
-  update(color: number, width: number): void {
+  update(color: number, width: number, intensity: number): void {
     const n = Ribbon.N;
     const pts = this.points;
     const count = Math.min(pts.length, n);
     this.mesh.visible = count >= 2;
     if (count < 2) return;
     const c = new Color(color);
+    const hot = new Color(0xffffff).lerp(c, 0.35);
     for (let i = 0; i < n; i += 1) {
       const p = pts[Math.min(i, count - 1)];
       const q = pts[Math.min(i + 1, count - 1)];
@@ -123,15 +128,17 @@ class Ribbon {
       dx /= len;
       dy /= len;
       const t = 1 - i / (n - 1);
-      const w = width * t;
-      // Perpendicular in the (x, y-up) plane.
+      const w = width * (0.25 + 0.75 * t);
       const nx = dy;
       const ny = dx;
-      this.pos.set([p.x + nx * w, -p.y + ny * w, 30], i * 6);
-      this.pos.set([p.x - nx * w, -p.y - ny * w, 30], i * 6 + 3);
-      const a = 0.65 * t * t;
-      this.col.set([c.r * 1.4, c.g * 1.4, c.b * 1.4, a], i * 8);
-      this.col.set([c.r, c.g, c.b, 0], i * 8 + 4);
+      const o = i * 9;
+      this.pos.set([p.x + nx * w, -p.y + ny * w, 30], o);
+      this.pos.set([p.x, -p.y, 30.5], o + 3);
+      this.pos.set([p.x - nx * w, -p.y - ny * w, 30], o + 6);
+      const a = 0.78 * t * t * intensity;
+      this.col.set([c.r, c.g, c.b, 0], i * 12);
+      this.col.set([hot.r * 1.4, hot.g * 1.4, hot.b * 1.4, a], i * 12 + 4);
+      this.col.set([c.r, c.g, c.b, 0], i * 12 + 8);
     }
     (this.geo.getAttribute("position") as BufferAttribute).needsUpdate = true;
     (this.geo.getAttribute("color") as BufferAttribute).needsUpdate = true;
@@ -195,6 +202,17 @@ export class GameView3D {
   private slowStreak = 0;
   private emaMs = 16.7;
   private forcedLow = false;
+  /** `?quality=N` pins the adaptive level (profiling / screenshots). */
+  private pinnedQuality: number | null = (() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get("quality");
+      return q === null ? null : Math.max(0, Math.min(4, Number(q) || 0));
+    } catch {
+      return null;
+    }
+  })();
+  private envTarget: WebGLRenderTarget | null = null;
+  private baseVignette = 0.3;
   lastRenderMs = 0;
 
   private constructor(
@@ -244,6 +262,7 @@ export class GameView3D {
     renderer.toneMappingExposure = 0.92;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.info.autoReset = false;
 
     const overlay = new Application();
     await overlay.init({
@@ -257,6 +276,46 @@ export class GameView3D {
     });
     overlay.ticker.stop();
     return new GameView3D(mount, renderer, overlay, glCanvas, overlayCanvas);
+  }
+
+  /** Renderer counters for profiling (draw calls / triangles per frame, live resources). */
+  stats(): Record<string, number> {
+    const info = this.renderer.info;
+    const count = (root: Group | null): { meshes: number; tris: number } => {
+      let meshes = 0;
+      let tris = 0;
+      root?.traverse((o) => {
+        const m = o as Mesh;
+        if (!m.isMesh || !m.visible) return;
+        meshes += 1;
+        const g = m.geometry;
+        const per = (g.index ? g.index.count : g.getAttribute("position").count) / 3;
+        tris += per * ((m as unknown as { count?: number }).count ?? 1);
+      });
+      return { meshes, tris };
+    };
+    const st = count(this.stage?.group ?? null);
+    const fg = count(this.dynamic);
+    const per: Record<string, number> = {};
+    this.models.forEach((m, i) => {
+      const c = count(m.root);
+      per[`f${i}_${m.def.id}`] = Math.round(c.tris);
+      per[`f${i}_meshes`] = c.meshes;
+    });
+    return {
+      ...per,
+      stageMeshes: st.meshes,
+      stageTris: Math.round(st.tris),
+      dynamicMeshes: fg.meshes,
+      dynamicTris: Math.round(fg.tris),
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      programs: info.programs?.length ?? 0,
+      quality: this.qualityLevel,
+      renderMs: this.lastRenderMs,
+    };
   }
 
   get width(): number {
@@ -281,6 +340,25 @@ export class GameView3D {
     return this.forcedLow ? Math.max(2, this.quality) : this.quality;
   }
 
+  /** Exposure, bloom, grade and a sky-derived reflection environment for the active stage. */
+  private applyLook(stage: Stage3D): void {
+    const look = stage.look;
+    this.renderer.toneMappingExposure = look.exposure;
+    this.post.setLook(look);
+    this.baseVignette = look.grade.vignette;
+    this.envTarget?.dispose();
+    const pmrem = new PMREMGenerator(this.renderer);
+    const hasSky = stage.envScene.children.length > 0;
+    if (hasSky) {
+      this.envTarget = pmrem.fromScene(stage.envScene, 0.02);
+    } else {
+      this.envTarget = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    }
+    pmrem.dispose();
+    this.scene.environment = this.envTarget.texture;
+    this.scene.environmentIntensity = look.envIntensity;
+  }
+
   private applyQuality(): void {
     const level = this.qualityLevel;
     const dpr = window.devicePixelRatio || 1;
@@ -292,10 +370,19 @@ export class GameView3D {
     }
     this.post.setEffects(level >= 2);
     this.stage?.setShadows(level < 3);
+    this.stage?.setDetail(level);
+    for (const m of this.models) m.setDetail(level);
   }
 
   /** Step quality down if the frame time stays above budget for ~1.5 s. */
   private adapt(dtMs: number): void {
+    if (this.pinnedQuality !== null) {
+      if (this.quality !== this.pinnedQuality) {
+        this.quality = this.pinnedQuality;
+        this.applyQuality();
+      }
+      return;
+    }
     const dt = Math.min(dtMs, 250);
     this.emaMs += (dt - this.emaMs) * 0.2;
     if (this.emaMs > 26) this.slowStreak += dt;
@@ -317,8 +404,13 @@ export class GameView3D {
     this.stage = buildStage(world.stage);
     this.scene.add(this.stage.group);
     this.stage.setShadows(this.qualityLevel < 3);
+    this.stage.setDetail(this.qualityLevel);
     this.scene.background = this.stage.background;
     this.scene.fog = this.stage.fog;
+    this.applyLook(this.stage);
+    // Fewer segments per part as the roster grows: duels get full detail, 8-player chaos stays smooth.
+    const n = world.fighters.length;
+    setSegScale(n <= 3 ? 1 : n <= 5 ? 0.8 : n <= 6 ? 0.68 : 0.58);
     this.models = world.fighters.map((f) => {
       const m = new FighterModel(f.def, slotStyle(f.slot));
       this.dynamic.add(m.root);
@@ -441,13 +533,17 @@ export class GameView3D {
         const power = Math.min(1.6, e.kb / 95 + e.damage / 24);
         const attackerColor = e.attacker >= 0 ? color(e.attacker) : "#ffb347";
         fx.hit(e.x, e.y, power, e.dx || 1, e.dy, attackerColor, e.fx);
-        this.camera.shake(Math.min(26, 2 + power * 11));
-        if (power > 0.9) this.camera.zoomPunch(0.012 + power * 0.012);
+        this.camera.shake(Math.min(26, 2 + power * 11), e.dx || 1, e.dy);
+        if (power > 0.9) {
+          this.camera.zoomPunch(0.012 + power * 0.012);
+          this.camera.rollKick((e.dx >= 0 ? -1 : 1) * Math.min(0.03, 0.008 + power * 0.01));
+        }
         this.hud.bumpPercent(e.victim);
         this.hitMomentum = Math.min(1, this.hitMomentum + power * 0.45);
         if (e.killing) {
           this.hud.flash(0xffffff, 0.3);
-          this.camera.shake(26);
+          this.camera.shake(26, e.dx || 1, e.dy);
+          this.camera.rollKick((e.dx >= 0 ? -1 : 1) * 0.04);
         }
         break;
       }
@@ -554,6 +650,7 @@ export class GameView3D {
 
   render(world: World | null, alpha: number, dtMs: number, hudOptions: HudOptions): void {
     const start = performance.now();
+    this.renderer.info.reset();
     this.syncSize();
     const w = this.sizeW;
     const h = this.sizeH;
@@ -584,7 +681,19 @@ export class GameView3D {
       visibleH,
     });
 
-    for (const f of world.fighters) this.models[f.index]?.update(f, alpha, this.time, dtFrames);
+    for (const f of world.fighters) {
+      let target: { x: number; y: number } | null = null;
+      let best = Infinity;
+      for (const o of world.fighters) {
+        if (o === f || !o.alive || o.vanished || o.team === f.team) continue;
+        const d = Math.abs(o.x - f.x) + Math.abs(o.y - f.y) * 0.5;
+        if (d < best) {
+          best = d;
+          target = o;
+        }
+      }
+      this.models[f.index]?.update(f, alpha, this.time, dtFrames, target);
+    }
     this.updateHalos(world);
     this.updateRibbons(world);
     this.updateProjectiles(world, alpha);
@@ -599,9 +708,10 @@ export class GameView3D {
     this.hud.update(world, this.projector, w, h, dtFrames, { ...hudOptions, uiScale: this.settings.uiScale });
 
     this.post.setImpact(this.hitMomentum * 0.0035 + this.koFlash * 0.004, 0, [1, 1, 1], this.koBlur, this.koX, this.koY);
-    this.post.setVignette(world.phase === "finishing" ? 0.55 : 0.3);
+    this.post.setVignette(world.phase === "finishing" ? 0.55 : this.baseVignette);
     this.post.render(dtMs / 1000);
     this.overlay.renderer.render(this.overlay.stage);
+    (window as unknown as { __airBrawlStats?: () => unknown }).__airBrawlStats = () => this.stats();
     this.frameCounter += 1;
     this.lastRenderMs = performance.now() - start;
   }
@@ -617,6 +727,7 @@ export class GameView3D {
     const lookY = -this.camera.y + sy;
     this.cam.aspect = w / h;
     this.cam.position.set(lookX + this.camera.x * 0.05, lookY + dist * 0.06, dist);
+    this.cam.up.set(Math.sin(this.camera.roll), Math.cos(this.camera.roll), 0);
     this.cam.lookAt(lookX, lookY, 0);
     this.cam.setViewOffset(w, h, 0, this.camera.inset / 2, w, h);
     this.cam.updateProjectionMatrix();
@@ -661,8 +772,8 @@ export class GameView3D {
         }
       }
       if (!active && ribbon.points.length) ribbon.points.pop();
-      if (ribbon.points.length > 9) ribbon.points.length = 9;
-      ribbon.update(color, radius * 0.9);
+      if (ribbon.points.length > Ribbon.N) ribbon.points.length = Ribbon.N;
+      ribbon.update(color, radius * 1.0, active ? 1 : 0.7);
     }
   }
 
@@ -875,8 +986,7 @@ export class GameView3D {
       const style = slotStyle(f.slot);
       const speed = Math.hypot(f.vx, f.vy);
       if (f.state === "hitstun" && f.hitlag === 0 && speed > 9) {
-        this.fx.trail(f.x, f.y - f.def.height * 0.5, "#ffffff", 80 + speed * 3);
-        this.fx.trail(f.x, f.y - f.def.height * 0.5, style.color, 110 + speed * 4);
+        this.fx.launchTrail(f.x, f.y - f.def.height * 0.5, f.vx, f.vy, style.color);
         if (speed > 16 && world.frame % 2 === 0) this.fx.speedLines(f.x, f.y, f.vx > 0 ? 1 : -1, style.color);
       } else if (f.state === "run" && world.frame % 7 === 0) {
         this.fx.dust(f.x, f.y, Math.sign(f.vx), 0.7);

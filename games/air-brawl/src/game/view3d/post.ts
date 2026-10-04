@@ -24,11 +24,13 @@ const GradeShader = {
     flashColor: { value: [1, 1, 1] },
     center: { value: new Vector2(0.5, 0.5) },
     zoomBlur: { value: 0 },
+    tint: { value: [1, 1, 1] },
+    lift: { value: [0, 0, 0] },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform float vignette; uniform float aberration; uniform float saturation; uniform float contrast;
-    uniform float flash; uniform vec3 flashColor; uniform vec2 center; uniform float zoomBlur; varying vec2 vUv;
+    uniform float flash; uniform vec3 flashColor; uniform vec2 center; uniform float zoomBlur; uniform vec3 tint; uniform vec3 lift; varying vec2 vUv;
     void main(){
       vec2 d = vUv - center;
       vec2 off = d * aberration;
@@ -43,6 +45,7 @@ const GradeShader = {
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, saturation);
       col = (col - 0.18) * contrast + 0.18;
+      col = col * tint + lift * (1.0 - clamp(l * 2.0, 0.0, 1.0));
       float v = smoothstep(0.95, 0.25, length(d) * 1.25);
       col *= mix(1.0 - vignette, 1.0, v);
       col = mix(col, flashColor * 3.0, flash);
@@ -76,6 +79,22 @@ export class PostStack {
   setSize(width: number, height: number): void {
     this.composer.setSize(width, height);
   }
+
+  /** Apply a stage's authored grade and bloom character. */
+  setLook(look: { bloom: { strength: number; radius: number; threshold: number }; grade: { saturation: number; contrast: number; tint: [number, number, number]; lift: [number, number, number]; vignette: number } }): void {
+    this.bloom.strength = look.bloom.strength;
+    this.bloom.radius = look.bloom.radius;
+    this.bloom.threshold = look.bloom.threshold;
+    const u = this.grade.uniforms;
+    u.saturation.value = look.grade.saturation;
+    u.contrast.value = look.grade.contrast;
+    u.tint.value = look.grade.tint;
+    u.lift.value = look.grade.lift;
+    this.baseVignette = look.grade.vignette;
+    u.vignette.value = look.grade.vignette;
+  }
+
+  baseVignette = 0.3;
 
   setEffects(reduced: boolean): void {
     this.bloomEnabled = !reduced;

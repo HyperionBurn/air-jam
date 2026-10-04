@@ -18,10 +18,10 @@ import { hexToNumber, mixHex, SLOT_STYLES, shapePoints, type SlotShape } from ".
 
 /* ---------------------------------------------------------------- atlas */
 
-type TexKey = "glow" | "dot" | "ring" | "streak" | "star" | "smoke" | "puff" | "shape";
-const TEX_INDEX: Record<Exclude<TexKey, "shape">, number> = { glow: 0, dot: 1, ring: 2, streak: 3, star: 4, smoke: 5, puff: 6 };
-const SHAPE_BASE = 8;
-const CELLS = 4;
+type TexKey = "glow" | "dot" | "ring" | "streak" | "star" | "smoke" | "puff" | "burst" | "crescent" | "ray" | "spark4" | "flame" | "shape";
+const TEX_INDEX: Record<Exclude<TexKey, "shape">, number> = { glow: 0, dot: 1, ring: 2, streak: 3, star: 4, smoke: 5, puff: 6, burst: 7, crescent: 8, ray: 9, spark4: 10, flame: 11 };
+const SHAPE_BASE = 12;
+const CELLS = 6;
 const CELL = 128;
 
 const buildAtlas = (): CanvasTexture => {
@@ -128,6 +128,78 @@ const buildAtlas = (): CanvasTexture => {
       g.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
       g.fill();
     }
+  });
+  // jagged comic burst: irregular spikes, white-hot core
+  at(7, (cx, cy) => {
+    const spikes = 16;
+    g.beginPath();
+    for (let i = 0; i < spikes * 2; i += 1) {
+      const a = (i / (spikes * 2)) * Math.PI * 2;
+      const r = i % 2 === 0 ? 40 + ((i * 53) % 24) : 15 + ((i * 29) % 7);
+      const px = cx + Math.cos(a) * r;
+      const py = cy + Math.sin(a) * r;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.closePath();
+    const grad = g.createRadialGradient(cx, cy, 0, cx, cy, 64);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.45, "rgba(255,255,255,0.96)");
+    grad.addColorStop(1, "rgba(255,255,255,0.5)");
+    g.fillStyle = grad;
+    g.fill();
+  });
+  // crescent smear: bright leading edge fading along the arc
+  at(8, (cx, cy) => {
+    const grad = g.createLinearGradient(8, 0, CELL - 8, 0);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.55)");
+    grad.addColorStop(1, "rgba(255,255,255,1)");
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(cx - 6, cy, 58, -1.15, 1.15);
+    g.arc(cx - 34, cy, 56, 1.0, -1.0, true);
+    g.closePath();
+    g.fill();
+  });
+  // anamorphic ray: thin symmetric streak
+  at(9, (cx, cy) => {
+    const grad = g.createLinearGradient(0, 0, CELL, 0);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.42, "rgba(255,255,255,0.8)");
+    grad.addColorStop(0.5, "rgba(255,255,255,1)");
+    grad.addColorStop(0.58, "rgba(255,255,255,0.8)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.beginPath();
+    g.moveTo(0, cy);
+    g.quadraticCurveTo(cx, cy - 7, CELL, cy);
+    g.quadraticCurveTo(cx, cy + 7, 0, cy);
+    g.fill();
+  });
+  // four-point spark
+  at(10, (cx, cy) => {
+    g.fillStyle = "rgba(255,255,255,1)";
+    g.beginPath();
+    g.moveTo(cx, cy - 60);
+    g.quadraticCurveTo(cx + 5, cy - 5, cx + 60, cy);
+    g.quadraticCurveTo(cx + 5, cy + 5, cx, cy + 60);
+    g.quadraticCurveTo(cx - 5, cy + 5, cx - 60, cy);
+    g.quadraticCurveTo(cx - 5, cy - 5, cx, cy - 60);
+    g.fill();
+  });
+  // flame teardrop
+  at(11, (cx, cy) => {
+    const grad = g.createRadialGradient(cx, cy + 14, 4, cx, cy, 58);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.7)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.beginPath();
+    g.moveTo(cx, cy - 58);
+    g.bezierCurveTo(cx + 40, cy - 14, cx + 38, cy + 44, cx, cy + 52);
+    g.bezierCurveTo(cx - 38, cy + 44, cx - 40, cy - 14, cx, cy - 58);
+    g.fill();
   });
   // identity shapes
   SLOT_STYLES.forEach((style, i) => {
@@ -404,42 +476,81 @@ export class Fx3D {
   /* ------------------------------------------------------------------ HITS */
 
   hit(x: number, y: number, power: number, dx: number, dy: number, color: string, fx: HitFx): void {
-    const p = Math.min(1.6, Math.max(0.2, power));
+    const p = Math.min(1.8, Math.max(0.2, power));
+    const tier = p < 0.55 ? 0 : p < 1.0 ? 1 : 2;
     const base = hexToNumber(color);
-    const hot = fx === "fire" ? 0xffa23d : fx === "electric" ? 0x9be8ff : fx === "magic" ? 0xe0a8ff : fx === "shock" ? 0xfff2c0 : 0xffd9a0;
-    // Hot starburst: the signature impact read.
-    this.spawn({ tex: "star", x, y, life: 8 + p * 5, size0: 50 * p, size1: 190 * p + 70, color: 0xffffff, rot: Math.random() * 3, z: 44 });
-    this.spawn({ tex: "star", x, y, life: 12 + p * 5, size0: 30 * p, size1: 150 * p + 50, color: hot, rot: Math.random() * 3, alpha: 0.9, z: 42 });
-    this.spawn({ tex: "glow", x, y, life: 14, size0: 90, size1: 190 + 140 * p, alpha: 0.9, color: hot });
-    this.spawn({ tex: "ring", x, y, life: 12 + p * 4, size0: 30, size1: 150 + 140 * p, alpha: 0.85, color: base });
+    const hot = fx === "fire" ? 0xffa23d : fx === "electric" ? 0x9be8ff : fx === "magic" ? 0xe0a8ff : fx === "shock" ? 0xfff2c0 : 0xffd27a;
     const ang = Math.atan2(dy, dx);
-    const n = this.count(8 + p * 18);
-    for (let i = 0; i < n; i += 1) {
-      const a = ang + (Math.random() - 0.5) * 1.5;
-      const speed = 8 + Math.random() * 14 * p + 4;
+    const rot0 = Math.random() * 6.28;
+    // Layered core: white-hot comic burst inside a coloured burst, over a soft bloom.
+    const coreSize = [100, 135, 215][tier] * (0.9 + p * 0.25);
+    this.spawn({ tex: "burst", x, y, life: 6 + tier * 2, size0: coreSize * 0.45, size1: coreSize, color: 0xffffff, rot: rot0, z: 46 });
+    this.spawn({ tex: "burst", x, y, life: 10 + tier * 3, size0: coreSize * 0.35, size1: coreSize * 1.55, color: hot, rot: rot0 + 0.4, alpha: 0.95, z: 44 });
+    this.spawn({ tex: "glow", x, y, life: 12 + tier * 3, size0: 90, size1: 170 + 140 * p, alpha: 0.85, color: hot });
+    // Anamorphic streak along the launch axis, a second across it for heavier hits.
+    this.spawn({ tex: "ray", x, y, life: 8 + tier * 3, size0: 60, size1: 260 + 330 * p, rot: ang, color: 0xffffff, alpha: 0.95, z: 45 });
+    if (tier >= 1) this.spawn({ tex: "ray", x, y, life: 10, size0: 50, size1: 200 + 160 * p, rot: ang + Math.PI / 2, color: hot, alpha: 0.7, z: 45 });
+    if (tier >= 1) this.spawn({ tex: "ring", x, y, life: 11 + tier * 4, size0: 30, size1: 130 + 170 * p, alpha: 0.9, color: tier === 2 ? 0xffffff : base, z: 42 });
+    // Hot shards thrown along the knockback.
+    const shards = this.count(5 + tier * 6 + p * 5);
+    for (let i = 0; i < shards; i += 1) {
+      const a = ang + (Math.random() - 0.5) * (tier === 2 ? 1.1 : 1.6);
+      const speed = 8 + Math.random() * (10 + 10 * p) + tier * 3;
       this.spawn({
         tex: "streak", x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, drag: 0.06, gravity: 0.1,
-        life: 12 + Math.random() * 12, size0: 54 + Math.random() * 36, size1: 12, stretch: true, color: Math.random() < 0.5 ? hot : 0xffffff,
+        life: 10 + Math.random() * (10 + tier * 5), size0: 50 + Math.random() * 44 + tier * 18, size1: 10, stretch: true, color: Math.random() < 0.5 ? hot : 0xffffff,
       });
     }
-    // Impact puff.
-    this.spawn({ tex: "puff", x, y, life: 20, size0: 40, size1: 120 + 60 * p, alpha: 0.5, color: 0xffffff, additive: false, rot: Math.random() * 6, vrot: 0.02 });
+    const sparks = this.count(3 + tier * 4);
+    for (let i = 0; i < sparks; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 6;
+      this.spawn({ tex: "spark4", x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, drag: 0.08, life: 14 + Math.random() * 14, size0: 22 + Math.random() * 20, size1: 2, color: hot, vrot: (Math.random() - 0.5) * 0.4, rot: Math.random() * 6 });
+    }
+    this.spawn({ tex: "puff", x, y, life: 16 + tier * 6, size0: 36, size1: 90 + 70 * p, alpha: 0.5, color: 0xffffff, additive: false, rot: rot0, vrot: 0.02 });
+    if (tier === 2) {
+      // Heavy / kill-strength: radial speed lines, shockwave, debris.
+      const lines = this.count(12);
+      for (let i = 0; i < lines; i += 1) {
+        const a = (i / lines) * Math.PI * 2 + Math.random() * 0.3;
+        this.spawn({ tex: "streak", x: x + Math.cos(a) * 30, y: y + Math.sin(a) * 30, vx: Math.cos(a) * 20, vy: Math.sin(a) * 20, drag: 0.1, life: 12, size0: 190, size1: 20, stretch: true, color: 0xffffff, alpha: 0.85 });
+      }
+      this.spawn({ tex: "ring", x, y, life: 20, size0: 40, size1: 360 + 120 * p, alpha: 0.7, color: hot, flat: 0.34, z: 40 });
+      for (let i = 0; i < this.count(8); i += 1) {
+        const a = ang + (Math.random() - 0.5) * 2.2;
+        const speed = 3 + Math.random() * 8;
+        this.spawn({ tex: "dot", x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 2, gravity: 0.35, drag: 0.02, life: 36 + Math.random() * 20, size0: 8 + Math.random() * 8, size1: 6, color: 0x8a8fa6, additive: false });
+      }
+    }
+    if (fx === "slash") {
+      this.spawn({ tex: "crescent", x, y, life: 10 + tier * 2, size0: 120, size1: 200 + 120 * p, rot: ang + Math.PI, color: 0xe6f6ff, alpha: 0.95, z: 43 });
+    }
     if (fx === "fire") {
-      for (let i = 0; i < this.count(9); i += 1) {
-        this.spawn({ tex: "glow", x: x + (Math.random() - 0.5) * 26, y, vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 3, drag: 0.03, life: 26 + Math.random() * 16, size0: 46, size1: 8, color: 0xff7a2d });
+      for (let i = 0; i < this.count(7 + tier * 3); i += 1) {
+        this.spawn({ tex: "flame", x: x + (Math.random() - 0.5) * 30, y, vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 3, drag: 0.03, life: 24 + Math.random() * 16, size0: 54, size1: 8, color: Math.random() < 0.5 ? 0xff7a2d : 0xffc24d });
       }
     } else if (fx === "electric") {
       for (let i = 0; i < this.count(8); i += 1) {
         const a = Math.random() * Math.PI * 2;
-        this.spawn({ tex: "streak", x, y, vx: Math.cos(a) * 16, vy: Math.sin(a) * 16, drag: 0.2, life: 8, size0: 80, size1: 30, stretch: true, color: 0xc8f4ff });
+        this.spawn({ tex: "streak", x, y, vx: Math.cos(a) * 16, vy: Math.sin(a) * 16, drag: 0.2, life: 8, size0: 90, size1: 30, stretch: true, color: 0xc8f4ff });
       }
     } else if (fx === "shock" || fx === "meteor") {
-      this.spawn({ tex: "ring", x, y: y + 16, life: 20, size0: 40, size1: 300, alpha: 0.8, color: 0xffe9a8, flat: 0.35 });
+      this.spawn({ tex: "ring", x, y: y + 16, life: 22, size0: 40, size1: 320, alpha: 0.8, color: 0xffe9a8, flat: 0.35 });
     } else if (fx === "magic") {
       for (let i = 0; i < this.count(7); i += 1) {
-        this.spawn({ tex: "star", x: x + (Math.random() - 0.5) * 40, y: y + (Math.random() - 0.5) * 40, vx: (Math.random() - 0.5) * 3, vy: -1 - Math.random() * 2, life: 24, size0: 30, size1: 4, color: 0xf0c0ff, vrot: 0.2 });
+        this.spawn({ tex: "spark4", x: x + (Math.random() - 0.5) * 40, y: y + (Math.random() - 0.5) * 40, vx: (Math.random() - 0.5) * 3, vy: -1 - Math.random() * 2, life: 26, size0: 32, size1: 4, color: 0xf0c0ff, vrot: 0.2 });
       }
     }
+  }
+
+  /** Comet tail behind a launched fighter; grows with speed. */
+  launchTrail(x: number, y: number, vx: number, vy: number, color: string): void {
+    const speed = Math.hypot(vx, vy);
+    const c = hexToNumber(color);
+    const k = Math.min(1.6, speed / 18);
+    this.spawn({ tex: "streak", x, y, vx: -vx * 0.12, vy: -vy * 0.12, life: 10, size0: 150 * k + 60, size1: 24, stretch: true, color: 0xffffff, alpha: 0.9 });
+    this.spawn({ tex: "streak", x, y, vx: -vx * 0.1, vy: -vy * 0.1, life: 14, size0: 210 * k + 70, size1: 30, stretch: true, color: c, alpha: 0.75 });
+    if (speed > 20) this.spawn({ tex: "spark4", x: x - vx * 0.3, y: y - vy * 0.3, life: 10, size0: 46, size1: 6, color: 0xffffff, vrot: 0.3, rot: Math.random() * 6 });
   }
 
   shieldHit(x: number, y: number, color: string): void {
@@ -583,6 +694,17 @@ export class Fx3D {
     this.spawn({ tex: "ring", x, y, life: 38, size0: 40, size1: 900 * scale, alpha: 0.7, color: 0xffffff });
     const outward = Math.atan2(dy || 0, dx || 0);
     const hasDir = dx !== 0 || dy !== 0;
+    // Screen-crossing light beam along the exit line with a white core, plus drifting sparkles.
+    const beamAng = hasDir ? outward : -Math.PI / 2;
+    this.spawn({ tex: "ray", x, y, life: 30, size0: 800, size1: 5200 * scale, rot: beamAng, color: 0xffffff, alpha: 1, z: 52, flat: 0.5 });
+    this.spawn({ tex: "ray", x, y, life: 38, size0: 500, size1: 4200 * scale, rot: beamAng, color: c, alpha: 0.85, z: 51, flat: 1.4 });
+    this.spawn({ tex: "burst", x, y, life: 16, size0: 120 * scale, size1: 640 * scale, color: 0xffffff, rot: Math.random() * 6, z: 53 });
+    for (let i = 0; i < this.count(26 * scale); i += 1) {
+      const a2 = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 7;
+      this.spawn({ tex: "spark4", x: x + (Math.random() - 0.5) * 120, y: y + (Math.random() - 0.5) * 120, vx: Math.cos(a2) * speed, vy: Math.sin(a2) * speed, drag: 0.04, life: 40 + Math.random() * 40, size0: 30 + Math.random() * 40, size1: 3, color: Math.random() < 0.5 ? 0xffffff : c, vrot: (Math.random() - 0.5) * 0.3, rot: Math.random() * 6 });
+    }
+
     for (let i = 0; i < this.count(22 * scale); i += 1) {
       const a = hasDir ? outward + Math.PI + (Math.random() - 0.5) * 1.6 : Math.random() * Math.PI * 2;
       const speed = 6 + Math.random() * 14;

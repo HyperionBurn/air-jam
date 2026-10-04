@@ -47,7 +47,7 @@ export const startMatch = async (browser, { bots = 3, stage, preset, viewport = 
   const hostCtx = await browser.newContext({ viewport });
   const host = await hostCtx.newPage();
   attachLogs(host, "host", logs);
-  await host.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+  await host.goto(`${BASE}/${process.env.AIRBRAWL_QUERY ?? ""}`, { waitUntil: "domcontentloaded" });
   await sleep(2500);
   const room = await host.evaluate(() => document.body.innerText.match(/ROOM CODE\s*([A-Z0-9]{4})/i)?.[1]);
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

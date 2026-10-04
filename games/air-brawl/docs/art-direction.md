@@ -5,6 +5,8 @@ at 12 timestamps plus two 16-frame animation contact sheets). The reference is u
 calibrate **style, lighting, camera, HUD structure and effect timing**. No characters, stages,
 logos or other assets are reproduced; every fighter, stage and effect here is original.
 
+> The full measured gap analysis and the overhaul log live in [visual-gap-analysis.md](visual-gap-analysis.md).
+
 ## What the reference does (and what the first Air Brawl build got wrong)
 
 | Area | Reference | First build (rejected) | Now |

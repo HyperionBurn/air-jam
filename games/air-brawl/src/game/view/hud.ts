@@ -2,6 +2,7 @@ import { Container, Graphics, Sprite, Text, type TextStyleOptions } from "pixi.j
 import type { Fighter, World } from "../sim/types";
 
 import { hexToNumber, mixHex, shortName, slotStyle, TEAM_STYLES, type SlotStyle } from "./palette";
+import { drawPortrait } from "./portraits";
 import type { GameTextures } from "./textures";
 
 const FONT = "'Arial Black', 'Segoe UI Black', 'Helvetica Neue', Arial, sans-serif";
@@ -30,6 +31,7 @@ interface Card {
   root: Container;
   bg: Graphics;
   icon: Sprite;
+  portrait: Graphics;
   name: Text;
   fighter: Text;
   percent: Text;
@@ -129,9 +131,11 @@ export class HudView {
     const status = text("", { fontSize: 12, fill: "#ffe066" });
     const team = new Graphics();
     const scoreText = text("", { fontSize: 22, fill: "#ffe9a8" });
-    root.addChild(bg, team, icon, fighter, percent, decimal, name, stocks, status, scoreText, plate);
+    const portrait = new Graphics();
+    drawPortrait(portrait, f.def.id, hexToNumber(style.light));
+    root.addChild(bg, team, portrait, icon, fighter, percent, decimal, name, stocks, status, scoreText, plate);
     this.cardLayer.addChild(root);
-    return { root, bg, icon, name, fighter, percent, decimal, plate, stocks, status, team, lastPercent: -1, lastStocks: -1, lastScore: -9999, hasStatus: false, bump: 0, flash: 0, stockSprites: [], scoreText };
+    return { root, bg, icon, portrait, name, fighter, percent, decimal, plate, stocks, status, team, lastPercent: -1, lastStocks: -1, lastScore: -9999, hasStatus: false, bump: 0, flash: 0, stockSprites: [], scoreText };
   }
 
   private makeTag(f: Fighter): Tag {
@@ -303,9 +307,14 @@ export class HudView {
     }
 
     const offline = opts.offline.has(f.id);
-    card.icon.position.set(tile * 0.5 + skew * 0.5, tile * 0.42);
-    card.icon.width = tile * 0.62;
-    card.icon.height = tile * 0.62;
+    // Fighter bust fills the tile; the identity shape (colour + shape redundancy) rides in the corner.
+    const bust = (tile / 100) * 0.96;
+    card.portrait.scale.set(bust);
+    card.portrait.position.set(skew * 0.5 + tile * 0.5 - 50 * bust, tile * 0.5 - 50 * bust - tile * 0.02);
+    card.portrait.alpha = dead ? 0.4 : 1;
+    card.icon.position.set(skew * 0.5 + tile * 0.82, tile * 0.2);
+    card.icon.width = tile * 0.26;
+    card.icon.height = tile * 0.26;
     card.fighter.style.fontSize = 10 * scale;
     card.fighter.anchor.set(0.5, 1);
     card.fighter.position.set(tile * 0.5 + skew * 0.4, tile - 3 * scale);

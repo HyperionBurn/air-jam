@@ -12,6 +12,14 @@ import {
 } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
+/** Global geometry detail multiplier (1 = full). Lowered when many fighters share the screen. */
+let segScale = 1;
+export const setSegScale = (v: number): void => {
+  segScale = Math.max(0.4, Math.min(1, v));
+};
+export const getSegScale = (): number => segScale;
+export const seg = (n: number, min = 6): number => Math.max(min, Math.round(n * segScale));
+
 /** Tapered capsule hanging from its pivot (y = 0) down to y = -length. */
 export const limbGeometry = (length: number, rTop: number, rBottom: number, segments = 18): BufferGeometry => {
   const pts: Vector2[] = [];
@@ -36,10 +44,11 @@ export const limbGeometry = (length: number, rTop: number, rBottom: number, segm
 };
 
 export const roundedBox = (w: number, h: number, d: number, radius: number, segments = 3): BufferGeometry =>
-  new RoundedBoxGeometry(w, h, d, segments, Math.min(radius, Math.min(w, h, d) / 2 - 0.001));
+  new RoundedBoxGeometry(w, h, d, segScale < 0.7 ? 1 : segScale < 0.9 ? Math.min(2, segments) : segments, Math.min(radius, Math.min(w, h, d) / 2 - 0.001));
 
-export const ellipsoid = (rx: number, ry: number, rz: number, seg = 20): BufferGeometry => {
-  const g = new SphereGeometry(1, seg, Math.max(8, Math.round(seg * 0.7)));
+export const ellipsoid = (rx: number, ry: number, rz: number, segments = 20): BufferGeometry => {
+  const n = Math.max(8, Math.round(segments * segScale));
+  const g = new SphereGeometry(1, n, Math.max(6, Math.round(n * 0.7)));
   g.scale(rx, ry, rz);
   return g;
 };

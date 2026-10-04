@@ -4,6 +4,7 @@
  * it through the production renderer, so art/animation review is deterministic.
  *
  *   /viewer?fighter=nova&stage=proving-ground&script=jab&frame=26&zoom=5
+ *   /viewer?stage=foundry&cam=0,-120,0.55&time=120     (establishing shot: cam=x,simY,zoom)
  *
  * script: idle | run | jab | ftilt | fsmash | usmash | jump | fair | special | shield | hit | dash
  * fighter: nova | volt | bulwark | wisp (index 0); the others stand idle for context.
@@ -60,6 +61,9 @@ export function ModelViewer() {
     const zoom = Number(q.get("zoom") ?? 4.5);
     const focus = Number(q.get("focus") ?? 0);
     const others = (q.get("others") ?? "volt,bulwark,wisp").split(",") as FighterId[];
+    const cam = q.get("cam")?.split(",").map(Number);
+    const settle = Number(q.get("time") ?? 24);
+    const spread = q.get("spread") === "1";
     let view: GameView3D | null = null;
     let cancelled = false;
 
@@ -67,7 +71,7 @@ export function ModelViewer() {
     const world = createWorld({ stageId: stage, countdownFrames: 0, hazards: false, seed: 9 }, roster);
     // Space fighters out so each can be framed alone.
     world.fighters.forEach((f, i) => {
-      f.x = -300 + i * 240;
+      f.x = spread ? -330 + i * 220 : -300 + i * 240;
       f.px = f.x;
       f.invuln = 0;
       f.facing = 1;
@@ -94,9 +98,17 @@ export function ModelViewer() {
       }
       const f = world.fighters[focus] ?? world.fighters[0];
       const hudOptions = { teams: false, timed: false, names: {}, offline: new Set<string>(), uiScale: 1, showTags: false };
-      v.camera.override = { x: f.x + 30, y: f.y - f.def.height * 0.5, zoom };
+      v.camera.override = cam && cam.length >= 3 ? { x: cam[0], y: cam[1], zoom: cam[2] } : { x: f.x + 30, y: f.y - f.def.height * 0.5, zoom };
       v.setWorld(world);
-      for (let i = 0; i < 24; i += 1) v.render(world, 1, 16.7, hudOptions);
+      const fx = q.get("fx");
+      if (fx) {
+        // Review aid: fire one impact of a chosen strength (light|mid|heavy|kill) at the focus fighter.
+        const power = ({ light: 0.4, mid: 0.8, heavy: 1.3, kill: 1.7 } as Record<string, number>)[fx] ?? 0.8;
+        world.events.push({ type: "hit", attacker: 1, victim: focus, x: f.x + 20, y: f.y - f.def.height * 0.55, damage: power * 12, kb: power * 70, angle: 40, dx: 0.8, dy: -0.6, moveId: "viewer", fx: (q.get("kind") as never) ?? "impact", sfx: "mid", lag: 8, killing: fx === "kill" });
+        v.handleEvents(world);
+        world.events.length = 0;
+      }
+      for (let i = 0; i < settle; i += 1) v.render(world, 1, 16.7, hudOptions);
       (window as unknown as { __viewerReady?: boolean }).__viewerReady = true;
       const loop = () => {
         if (cancelled) return;
