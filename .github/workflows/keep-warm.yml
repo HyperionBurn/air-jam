@@ -1,0 +1,18 @@
+name: keep-warm
+
+# Pings the Render free-tier realtime server so it does not spin down after
+# 15 minutes without traffic. GitHub cron is best-effort (can lag a few minutes).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping air-brawl-server
+        run: curl -fsS --retry 3 --retry-delay 10 --retry-all-errors --max-time 90 https://air-brawl-server.onrender.com/health
