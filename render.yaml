@@ -21,6 +21,9 @@ services:
     envVars:
       - key: VITE_AIR_JAM_SERVER_URL
         value: https://air-brawl-server.onrender.com
+      # Required in production: without it the SDK falls back to same-origin sockets.
+      - key: VITE_AIR_JAM_PUBLIC_HOST
+        value: https://air-brawl.onrender.com
       - key: VITE_AIR_JAM_APP_ID
         value: air-brawl
       - key: NODE_VERSION
