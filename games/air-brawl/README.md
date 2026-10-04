@@ -45,6 +45,26 @@ where your thumb lands. Right side: five large pads.
 Down on the stick falls faster; tapping down on a thin platform drops through.
 Haptics confirm hits, KOs, shield breaks and respawns (can be turned off per phone).
 
+## Controls (Xbox / PlayStation / Switch pads)
+
+Any standard-mapping gamepad works. Plug it into (or pair it with) the machine showing the game and
+**press any button in the lobby to join** - no phone needed. A pad can also be paired with a phone or
+laptop that opened `/controller`.
+
+| Input | Xbox / PlayStation | Action |
+| --- | --- | --- |
+| Move | Left stick / D-pad | Run, aim tilts, fast-fall, drop through platforms |
+| Attack | A / Cross | Jab chain, tilts with the stick |
+| Special | B / Circle | Neutral / side / up / down special |
+| Jump | X, Y / Square, Triangle | Short hop, full hop (hold), double jump |
+| Shield | LT, RT / L2, R2 | Block, roll, spot dodge, air dodge |
+| Grab | LB, RB / L1, R1 | Grab |
+| Smash | Right stick | Flick for an instant smash attack in that direction |
+| Lobby | D-pad left/right fighter, up/down stage vote, A ready, B un-ready, X team | Leader: LB/RB CPU count, Y mode, Select items, Start begins |
+
+Pads rumble on hits, KOs and shield breaks. Chrome exposes at most 4 pads per page; any extra players
+join from their phones as usual, and the two can be mixed in one room.
+
 ## Fighters
 
 - **Nova** — all-rounder. Pulse shot, dash punch, rising burst, shockwave.

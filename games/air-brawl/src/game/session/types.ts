@@ -32,6 +32,8 @@ export interface PlayerEntry {
   team: number;
   connected: boolean;
   stageVote: StageId | null;
+  /** A gamepad plugged into the host machine (no phone involved). */
+  local?: boolean;
 }
 
 export interface HudEntry {
@@ -137,10 +139,11 @@ export interface AirBrawlState {
 
   actions: {
     syncRoster: (ctx: AirJamActionContext, payload: { controllers: RosterSync[] }) => void;
-    setFighter: (ctx: AirJamActionContext, payload: { fighterId: FighterId }) => void;
-    setReady: (ctx: AirJamActionContext, payload: { ready: boolean }) => void;
-    setTeam: (ctx: AirJamActionContext, payload: { team: number }) => void;
-    voteStage: (ctx: AirJamActionContext, payload: { stage: StageId | null }) => void;
+    /** `playerId` lets the host act for a local gamepad player; ignored for everyone else. */
+    setFighter: (ctx: AirJamActionContext, payload: { fighterId: FighterId; playerId?: string }) => void;
+    setReady: (ctx: AirJamActionContext, payload: { ready: boolean; playerId?: string }) => void;
+    setTeam: (ctx: AirJamActionContext, payload: { team: number; playerId?: string }) => void;
+    voteStage: (ctx: AirJamActionContext, payload: { stage: StageId | null; playerId?: string }) => void;
     updateSettings: (ctx: AirJamActionContext, payload: { patch: Partial<MatchSettings> }) => void;
     setBotCount: (ctx: AirJamActionContext, payload: { count: number; difficulty?: BotDifficulty }) => void;
     startMatch: (ctx: AirJamActionContext, payload: { force?: boolean }) => void;
@@ -164,6 +167,7 @@ export interface RosterSync {
   id: string;
   name: string;
   connected: boolean;
+  local?: boolean;
 }
 
 export interface AgentControlPayload {

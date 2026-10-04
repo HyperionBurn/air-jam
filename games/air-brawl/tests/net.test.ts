@@ -72,7 +72,7 @@ describe("input codec", () => {
   it("returns neutral for a controller that has never sent anything", () => {
     const d = new InputDecoder();
     const f = d.read(undefined, 100);
-    expect(f).toEqual({ mx: 0, my: 0, held: 0, taps: 0 });
+    expect(f).toEqual({ mx: 0, my: 0, held: 0, taps: 0, flick: 0 });
     expect(d.stale).toBe(true);
   });
 

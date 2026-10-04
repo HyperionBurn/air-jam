@@ -10,6 +10,7 @@ import { EndedPanel } from "./components/ended-panel";
 import { LobbyPanel } from "./components/lobby-panel";
 import { PlayScreen } from "./components/play-screen";
 import { useControllerRuntime } from "./hooks/use-controller-runtime";
+import { useGamepadController } from "./hooks/use-gamepad";
 
 export function ControllerView() {
   return (
@@ -36,6 +37,7 @@ function PhoneApp() {
   const phase = useMatchStore((s) => s.matchPhase);
   const me = useMatchStore((s) => (controllerId ? s.players[controllerId] : undefined));
   const { pipe, connected, connection } = useControllerRuntime();
+  const pad = useGamepadController(pipe, phase === "countdown" || phase === "playing");
   const { latestToast } = useControllerToasts();
   const audio = useAudio<AirBrawlSoundId>();
   const lastPhase = useRef(phase);
@@ -55,6 +57,16 @@ function PhoneApp() {
           style={{ background: `${latestToast.color ?? "#38bdf8"}33`, color: latestToast.color ?? "#bae6fd", border: `2px solid ${latestToast.color ?? "#38bdf8"}` }}
         >
           {latestToast.message}
+        </div>
+      )}
+      {pad && (
+        <div className="ab-safe pointer-events-none absolute inset-x-0 bottom-1.5 z-40 flex justify-center">
+          <div className="rounded-full border border-cyan-300/50 bg-black/75 px-3 py-1 text-[11px] font-black tracking-[0.12em] text-cyan-100 uppercase backdrop-blur">
+            🎮 {pad.labels.name} pad
+            {phase === "lobby" || phase === "ended"
+              ? ` · D-pad moves · ${pad.labels.confirm} selects · ${pad.labels.start} = ${phase === "ended" ? "rematch" : "ready"}`
+              : ` · ${pad.labels.attack} attack · ${pad.labels.special} special · ${pad.labels.smash.toLowerCase()} smash`}
+          </div>
         </div>
       )}
       {!me ? (

@@ -24,6 +24,9 @@ export const gameInputSchema = z.object({
   seq: z.number().int().min(0),
   ct: z.number(),
   echo: z.number().int().optional(),
+  /** Right-stick smash flick counter (wraps) and the direction of the latest flick (1 R, 2 L, 3 U, 4 D). */
+  tc: z.number().int().min(0).max(255).optional(),
+  cd: z.number().int().min(0).max(4).optional(),
 });
 
 export type WireInput = z.infer<typeof gameInputSchema>;
@@ -60,6 +63,8 @@ export class InputEncoder {
   private my = 0;
   private held = 0;
   private counters = { tj: 0, ta: 0, ts: 0, th: 0 };
+  private flicks = 0;
+  private flickDir = 0;
   private seq = 0;
   private echo: number | undefined;
 
@@ -84,6 +89,19 @@ export class InputEncoder {
   release(bit: number): boolean {
     if (!(this.held & bit)) return false;
     this.held &= ~bit;
+    return true;
+  }
+
+  /**
+   * Right-stick smash: an attack press that carries a direction, in one atomic change, so the host
+   * can never see the press without the flick (or the flick without the press).
+   */
+  smash(dir: number): boolean {
+    if (dir < 1 || dir > 4) return false;
+    this.held |= BTN.ATTACK;
+    this.counters.ta = (this.counters.ta + 1) & 255;
+    this.flicks = (this.flicks + 1) & 255;
+    this.flickDir = dir;
     return true;
   }
 
@@ -116,6 +134,8 @@ export class InputEncoder {
       th: this.counters.th,
       seq: this.seq,
       ct: Math.round(now),
+      tc: this.flicks,
+      cd: this.flickDir,
     };
     if (this.echo !== undefined) out.echo = this.echo;
     return out;
@@ -161,6 +181,7 @@ export class InputDecoder {
       f.my = 0;
       f.held = 0;
       f.taps = 0;
+      f.flick = 0;
       this.stale = true;
       return f;
     }
@@ -196,6 +217,11 @@ export class InputDecoder {
         if (delta > 0 && delta < 128) taps |= b.bit;
       }
     }
+    let flick = 0;
+    if (this.last && raw.tc !== undefined && this.last.tc !== undefined) {
+      const delta = (raw.tc - this.last.tc + 256) & 255;
+      if (delta > 0 && delta < 128) flick = raw.cd ?? 0;
+    }
     this.last = raw;
 
     if (this.stale) {
@@ -204,12 +230,14 @@ export class InputDecoder {
       f.my = 0;
       f.held = 0;
       f.taps = 0;
+      f.flick = 0;
       return f;
     }
     f.mx = raw.mx / 100;
     f.my = raw.my / 100;
     f.held = raw.held & 15;
     f.taps = taps;
+    f.flick = flick;
     return f;
   }
 
@@ -221,5 +249,6 @@ export class InputDecoder {
     this.frame.my = 0;
     this.frame.held = 0;
     this.frame.taps = 0;
+    this.frame.flick = 0;
   }
 }

@@ -62,6 +62,7 @@ export const BigButton = ({
   disabled,
   className = "",
   pulse,
+  padReady,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -70,11 +71,14 @@ export const BigButton = ({
   disabled?: boolean;
   className?: string;
   pulse?: boolean;
+  /** Marks the button the gamepad Start button should press. */
+  padReady?: boolean;
 }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
+    data-pad-ready={padReady ? "" : undefined}
     className={`min-h-[60px] w-full rounded-2xl border-4 border-black/30 px-4 text-xl font-black tracking-[0.14em] uppercase shadow-[0_6px_0_rgba(0,0,0,0.4)] transition active:translate-y-[4px] active:shadow-[0_2px_0_rgba(0,0,0,0.4)] disabled:opacity-40 ${pulse ? "ab-ready-pulse" : ""} ${className}`}
     style={{ background: color, color: textColor, ["--ring" as string]: `${color}88` }}
   >

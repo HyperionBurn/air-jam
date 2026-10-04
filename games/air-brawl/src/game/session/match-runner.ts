@@ -94,6 +94,7 @@ export class MatchRunner {
         out.my = override.my;
         out.held = override.held | override.tapOnce;
         out.taps = override.tapOnce;
+        out.flick = 0;
         override.tapOnce = 0;
         if (override.frames > 0) {
           override.frames -= 1;
@@ -107,6 +108,7 @@ export class MatchRunner {
         out.my = b.my;
         out.held = b.held;
         out.taps = b.taps;
+        out.flick = 0;
         continue;
       }
       const decoder = this.decoders.get(id);
@@ -115,6 +117,7 @@ export class MatchRunner {
         out.my = 0;
         out.held = 0;
         out.taps = 0;
+        out.flick = 0;
         decoder?.reset();
         continue;
       }
@@ -123,6 +126,7 @@ export class MatchRunner {
       out.my = frame.my;
       out.held = frame.held;
       out.taps = frame.taps;
+      out.flick = frame.flick ?? 0;
     }
     return this.inputs;
   }

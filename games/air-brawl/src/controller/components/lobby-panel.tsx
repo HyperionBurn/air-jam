@@ -147,6 +147,7 @@ export const LobbyPanel = ({ me }: { me: PlayerEntry }) => {
 
       <div className="border-t border-white/10 bg-[#070b18]/95 p-3 backdrop-blur">
         <BigButton
+          padReady
           pulse={me.ready}
           color={me.ready ? style.color : "#34d399"}
           textColor={me.ready ? "#05070f" : "#04210f"}

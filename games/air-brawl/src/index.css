@@ -243,3 +243,12 @@
 .ab-respawn-flash {
   animation: ab-respawn-flash 900ms ease-out both;
 }
+
+/* Gamepad-driven menus: a clear focus ring on whatever the D-pad has selected. */
+html[data-pad-nav] button:focus,
+html[data-pad-nav] [role="button"]:focus,
+html[data-pad-nav] [role="radio"]:focus {
+  outline: 4px solid #5ad7ff;
+  outline-offset: 3px;
+  box-shadow: 0 0 22px #5ad7ff99;
+}

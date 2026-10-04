@@ -104,6 +104,11 @@ export class InputPipe {
     if (this.encoder.release(bit)) this.markChanged(true);
   }
 
+  /** Right-stick smash flick (gamepads): attack press + direction in one immediate packet. */
+  smash(dir: number): void {
+    if (this.encoder.smash(dir)) this.markChanged(true);
+  }
+
   releaseAll(): void {
     if (this.encoder.releaseAll()) this.markChanged(true);
   }

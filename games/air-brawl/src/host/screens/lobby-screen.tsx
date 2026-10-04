@@ -6,8 +6,10 @@ import { STAGES } from "../../game/data/stages";
 import { getReadiness, leaderIdOf, PRESETS, participantsOf } from "../../game/session/reducers";
 import { useMatchStore } from "../../game/session/store";
 import type { PlayerEntry } from "../../game/session/types";
+import { PAD_LABELS, type PadKind } from "../../game/net/gamepad";
 import { slotStyle } from "../../game/view/palette";
 import { FighterPortrait, ShapeIcon, TeamChip } from "../../ui/identity";
+import { useLocalPads } from "../runtime/local-pads";
 
 const useNow = (active: boolean, intervalMs = 100): number => {
   const [now, setNow] = useState(() => Date.now());
@@ -19,7 +21,7 @@ const useNow = (active: boolean, intervalMs = 100): number => {
   return now;
 };
 
-const SlotCard = ({ slot, player, teams }: { slot: number; player?: PlayerEntry; teams: boolean }) => {
+const SlotCard = ({ slot, player, teams, padKind, stageLabel }: { slot: number; player?: PlayerEntry; teams: boolean; padKind?: PadKind; stageLabel: string }) => {
   const style = slotStyle(slot);
   if (!player) {
     return (
@@ -50,6 +52,9 @@ const SlotCard = ({ slot, player, teams }: { slot: number; player?: PlayerEntry;
           {player.isBot && (
             <span className="rounded-full bg-white/15 px-[0.9vh] py-[0.1vh] text-[1.3vh] font-black tracking-[0.15em] uppercase">CPU</span>
           )}
+          {player.local && (
+            <span className="rounded-full bg-cyan-300/90 px-[0.9vh] py-[0.1vh] text-[1.3vh] font-black tracking-[0.15em] text-[#04202a] uppercase">Pad</span>
+          )}
         </div>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden py-[0.4vh]">
@@ -66,8 +71,23 @@ const SlotCard = ({ slot, player, teams }: { slot: number; player?: PlayerEntry;
             color: offline ? "#b9bfd6" : player.ready ? "#05070f" : "#e6ecff",
           }}
         >
-          {offline ? "Reconnecting…" : player.ready ? "Ready" : "Choosing"}
+          {offline ? (player.local ? "Pad unplugged" : "Reconnecting…") : player.ready ? "Ready" : "Choosing"}
         </div>
+        {player.local && !offline && padKind && (
+          <div className="mt-[0.6vh] text-[1.25vh] leading-tight font-bold tracking-[0.06em] text-slate-300 uppercase">
+            {player.ready ? (
+              <>
+                <b className="text-white">{PAD_LABELS[padKind].back}</b> un-ready
+              </>
+            ) : (
+              <>
+                <b className="text-white">◀ ▶</b> fighter · <b className="text-white">{PAD_LABELS[padKind].confirm}</b> ready
+                <br />
+                <b className="text-white">▲ ▼</b> stage: {player.stageVote ? STAGES[player.stageVote].name : stageLabel}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -80,6 +100,9 @@ export const LobbyScreen = () => {
   const autoStartAtMs = useMatchStore((s) => s.autoStartAtMs);
   const scoreboard = useMatchStore((s) => s.scoreboard);
   const now = useNow(autoStartAtMs !== null);
+  const pads = useLocalPads();
+  const padKinds = new Map(pads.map((p) => [p.id, p.kind] as const));
+  const waitingPads = pads.filter((p) => p.connected && !p.joined).length;
   const state = { players };
   const readiness = getReadiness(state);
   const leader = leaderIdOf(state);
@@ -106,6 +129,12 @@ export const LobbyScreen = () => {
           </h1>
           <p className="mt-[1vh] max-w-[60vh] text-[2.3vh] font-bold text-slate-200">
             Scan the code. Pick a fighter. Hit Ready. Knock everyone off the map.
+          </p>
+          <p className="mt-[0.6vh] text-[1.8vh] font-black tracking-[0.06em] text-cyan-200 uppercase">
+            🎮{" "}
+            {waitingPads > 0
+              ? `${waitingPads} controller${waitingPads > 1 ? "s" : ""} detected - press any button to join`
+              : "Plug in an Xbox or PlayStation controller and press any button to join"}
           </p>
           <div className="mt-[1.4vh] flex flex-wrap gap-[1vh] text-[1.7vh] font-black tracking-[0.12em] uppercase">
             {[
@@ -139,7 +168,14 @@ export const LobbyScreen = () => {
 
       <main className={`grid min-h-0 flex-1 grid-cols-4 gap-[1.6vh] ${count > 4 ? "grid-rows-2" : "grid-rows-1"}`}>
         {Array.from({ length: count > 4 ? 8 : 4 }, (_, slot) => (
-          <SlotCard key={slot} slot={slot} player={bySlot.get(slot)} teams={settings.teams} />
+          <SlotCard
+            key={slot}
+            slot={slot}
+            player={bySlot.get(slot)}
+            teams={settings.teams}
+            padKind={bySlot.get(slot) ? padKinds.get(bySlot.get(slot)!.id) : undefined}
+            stageLabel={stageLabel}
+          />
         ))}
       </main>
 
@@ -149,11 +185,18 @@ export const LobbyScreen = () => {
             {readiness.ready}/{readiness.humans} ready
           </span>
           {leaderName ? (
-            <span>
-              <span className="text-cyan-300">{leaderName}</span> runs match setup from their phone
-            </span>
+            leader && players[leader]?.local ? (
+              <span>
+                <span className="text-cyan-300">{leaderName}</span> runs setup:{" "}
+                <b className="text-white">LB / RB</b> CPUs · <b className="text-white">Y</b> mode · <b className="text-white">Start</b> begins
+              </span>
+            ) : (
+              <span>
+                <span className="text-cyan-300">{leaderName}</span> runs match setup from their phone
+              </span>
+            )
           ) : (
-            <span>Waiting for the first fighter to scan in…</span>
+            <span>Waiting for the first fighter to scan in or press a button…</span>
           )}
         </div>
         {leaderboard.length > 0 && (

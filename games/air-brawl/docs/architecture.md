@@ -42,6 +42,14 @@ Phones never decide gameplay; they send *intent* (stick percent, held bitmask, p
 * **Latency instrumentation** (debug overlay): per-controller packet rate, input age, relative jitter, and true RTT via echoed probes on the state lane; render/tick cost; dropped frames; adaptive-quality level.
 * Reconnect: the SDK keeps a 30 s controller lease; the same phone resumes the same fighter. The server does not push a presence change during the lease, so the host relies on the stale-input watchdog (above).
 
+### Gamepads
+
+`game/net/gamepad.ts` is a pure core (`GamepadMapper`, `PadDriver`) that turns a W3C "standard" pad snapshot into the same intent the touch controls produce: stick, held bitmask, press counters, and a right-stick **smash flick** (`tc`/`cd` on the wire; the sim treats it as a perfect flick plus an Attack press).
+
+* **Host-attached pads** (`host/runtime/local-pads.ts`) join the room as local players with ids `pad:<index>`. Their input goes through `InputEncoder`/`InputDecoder` like a phone; the host acts for them in the reducers via `playerId` (honoured only for players flagged `local`). Lobby navigation lives in `session/pad-menu.ts`.
+* **Controller-page pads** (`controller/hooks/use-gamepad.ts`) feed the page's `InputPipe` and drive menu focus spatially; `navigator.vibrate` is shimmed to the pad's dual-rumble actuator.
+* The Gamepad API is polling-only and Chrome shows at most 4 pads per page.
+
 ## Replicated state
 
 One `createAirJamStore` (`src/game/session/store.ts`), kept small: phase, settings, roster, ready/team/vote flags, HUD snapshot (percent/stocks/status, ~4 Hz), match spec, results, session scoreboard. Hot sim state never leaves the host. Reducers are pure functions (`reducers.ts`) so they are unit tested without the SDK.

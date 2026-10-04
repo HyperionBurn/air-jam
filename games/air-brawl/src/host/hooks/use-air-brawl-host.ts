@@ -5,12 +5,14 @@ import type { AirBrawlSoundId } from "../../game/contracts/sounds";
 import { gameInputSchema } from "../../game/net/input-codec";
 import { createDiagnostics, type HostDiagnostics } from "../../game/net/diagnostics";
 import { MatchRunner } from "../../game/session/match-runner";
+import { handlePadMenu, type PadMenuActions } from "../../game/session/pad-menu";
 import { useMatchStore } from "../../game/session/store";
 import type { MatchSpec, RosterSync } from "../../game/session/types";
 import { createWorld, stepWorld } from "../../game/sim/world";
 import { GameView3D } from "../../game/view3d/game-view3d";
 import type { HudOptions } from "../../game/view/hud";
 import { FeedbackRouter } from "../runtime/feedback";
+import { isPadId, localPads, useLocalPads } from "../runtime/local-pads";
 import { useHostSettings } from "../runtime/host-settings";
 import { BotBrain } from "../../game/ai/bot-brain";
 import type { World } from "../../game/sim/types";
@@ -50,6 +52,7 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
   const players = useMatchStore((s) => s.players);
   const telemetry = useMatchStore((s) => s.telemetry);
   const eventMode = useMatchStore((s) => s.settings.eventMode);
+  const pads = useLocalPads();
 
   const viewRef = useRef<GameView3D | null>(null);
   const runnerRef = useRef<MatchRunner | null>(null);
@@ -75,6 +78,18 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
   const silentRef = useRef<Set<string>>(new Set());
   const offlineUnionRef = useRef<Set<string>>(new Set());
 
+  // Read-only snapshot for QA scripts (headless gamepad / flow checks). No behaviour depends on it.
+  useEffect(() => {
+    (window as unknown as { __airBrawlState?: () => unknown }).__airBrawlState = () => ({
+      phase: phaseRef.current,
+      players: Object.values(playersRef.current).map((p) => ({ id: p.id, name: p.name, fighter: p.fighterId, ready: p.ready, local: !!p.local, connected: p.connected, slot: p.slot })),
+      fighters: runnerRef.current?.world.fighters.map((f) => ({ id: f.id, x: Math.round(f.x), y: Math.round(f.y), vx: f.vx, facing: f.facing, state: f.state, moveId: f.moveId, percent: f.percent })) ?? [],
+    });
+    return () => {
+      delete (window as unknown as { __airBrawlState?: unknown }).__airBrawlState;
+    };
+  }, []);
+
   settingsRef.current = settings;
   hostRef.current = host;
   playersRef.current = players;
@@ -85,7 +100,9 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
 
   const hapticFn = useCallback(
     (controllerId: string, payload: { pattern: "light" | "medium" | "heavy" | "success" | "failure" | "custom" }) => {
-      sendSignal("HAPTIC", payload, controllerId);
+      // Pads plugged into this machine rumble locally; everyone else gets the signal over the wire.
+      if (isPadId(controllerId)) localPads.rumble(controllerId, payload.pattern);
+      else sendSignal("HAPTIC", payload, controllerId);
     },
     [sendSignal],
   );
@@ -126,12 +143,14 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
   /* ---------------------------------------------------------------- ROSTER */
 
   useEffect(() => {
-    const controllers =
+    const remote =
       host.controllers.length > 0
         ? rosterFromControllers(host.controllers)
         : host.players.map((p) => ({ id: p.id, name: p.label, connected: true }));
-    void actions.syncRoster({ controllers });
-  }, [host.controllers, host.players, actions]);
+    // Gamepads on this machine are first-class players alongside phones.
+    void actions.syncRoster({ controllers: [...remote, ...localPads.roster()] });
+    // `pads` changes whenever a pad joins, leaves or drops, which is when the roster must be re-sent.
+  }, [host.controllers, host.players, actions, pads]);
 
   useEffect(() => {
     const offline = new Set<string>();
@@ -276,7 +295,23 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
 
   /* ------------------------------------------------------------- MAIN LOOP */
 
-  const readInput = useCallback((id: string) => getInput(id), [getInput]);
+  const readInput = useCallback((id: string) => (isPadId(id) ? localPads.wire(id, performance.now()) : getInput(id)), [getInput]);
+
+  const padActions = useMemo<PadMenuActions>(
+    () => ({
+      setFighter: (playerId, fighterId) => void actions.setFighter({ fighterId, playerId }),
+      setReady: (playerId, ready) => void actions.setReady({ ready, playerId }),
+      setTeam: (playerId, team) => void actions.setTeam({ team, playerId }),
+      voteStage: (playerId, stage) => void actions.voteStage({ stage, playerId }),
+      updateSettings: (patch) => void actions.updateSettings({ patch }),
+      startMatch: (force) => void actions.startMatch({ force }),
+      rematch: () => void actions.rematch(),
+      returnToLobby: () => void actions.returnToLobby(),
+    }),
+    [actions],
+  );
+  const padActionsRef = useRef(padActions);
+  padActionsRef.current = padActions;
 
   useHostTick({
     enabled: true,
@@ -289,6 +324,14 @@ export function useAirBrawlHost(mountRef: React.RefObject<HTMLElement | null>): 
       const runner = runnerRef.current;
       const paused = hostRef.current.runtimeState === "paused";
       diag.stepsPerFrame += 1;
+
+      // Local gamepads: poll once per tick; in the lobby / results they also drive the menus.
+      const phase = phaseRef.current;
+      const padEdges = localPads.sample(now, phase === "lobby");
+      if (phase === "lobby" || phase === "ended") {
+        const state = useMatchStore.getState();
+        for (const { id, edges } of padEdges) handlePadMenu(id, edges, state, padActionsRef.current);
+      }
 
       if (runner && !paused) {
         const inputs = runner.buildInputs(readInput, now, offlineRef.current);

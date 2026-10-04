@@ -34,8 +34,14 @@ const scratch = { x: 0, y: 0 };
  */
 export const readInput = (f: Fighter, input: InputFrame): void => {
   applyDeadzone(input.mx, input.my, scratch);
-  const sx = scratch.x;
-  const sy = scratch.y;
+  let sx = scratch.x;
+  let sy = scratch.y;
+  // Right-stick smash: behave as a perfect flick in that direction paired with an attack press.
+  const cFlick = input.flick ?? 0;
+  if (cFlick > 0) {
+    sx = cFlick === 1 ? 1 : cFlick === 2 ? -1 : 0;
+    sy = cFlick === 3 ? -1 : cFlick === 4 ? 1 : 0;
+  }
 
   // Flick detection against the last few samples (before pushing the new one).
   let minAbsX = 1;
@@ -57,6 +63,15 @@ export const readInput = (f: Fighter, input: InputFrame): void => {
   if (sy <= -FLICK_HIGH && maxY >= -FLICK_LOW) f.flickUpAge = 0;
   if (sy >= FLICK_HIGH && minY <= FLICK_LOW) f.flickDownAge = 0;
 
+  if (cFlick > 0) {
+    if (sx !== 0) {
+      f.flickXAge = 0;
+      f.flickXDir = sx > 0 ? 1 : -1;
+    }
+    if (sy < 0) f.flickUpAge = 0;
+    if (sy > 0) f.flickDownAge = 0;
+  }
+
   f.sxHist[f.histPos] = sx;
   f.syHist[f.histPos] = sy;
   f.histPos = (f.histPos + 1) % HIST;
@@ -67,7 +82,7 @@ export const readInput = (f: Fighter, input: InputFrame): void => {
 
   f.prevHeld = f.held;
   f.held = input.held;
-  const taps = input.taps | (input.held & ~f.prevHeld);
+  const taps = input.taps | (input.held & ~f.prevHeld) | (cFlick > 0 ? BTN.ATTACK : 0);
   f.bJump = taps & BTN.JUMP ? BUFFER_FRAMES : Math.max(0, f.bJump - 1);
   f.bAttack = taps & BTN.ATTACK ? BUFFER_FRAMES : Math.max(0, f.bAttack - 1);
   f.bSpecial = taps & BTN.SPECIAL ? BUFFER_FRAMES : Math.max(0, f.bSpecial - 1);

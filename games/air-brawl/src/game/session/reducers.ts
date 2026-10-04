@@ -58,6 +58,12 @@ type Ctx = AirJamActionContext;
 
 const isHost = (ctx: Ctx): boolean => ctx.role === "host";
 
+/** Who an action applies to: the host may act for a local gamepad player via `playerId`. */
+const actorOf = (state: State, ctx: Ctx, payload: { playerId?: string }): string => {
+  if (isHost(ctx) && payload.playerId && state.players[payload.playerId]?.local) return payload.playerId;
+  return ctx.actorId;
+};
+
 /* ------------------------------------------------------------------ QUERIES */
 
 export const humansOf = (state: Pick<State, "players">): PlayerEntry[] =>
@@ -157,8 +163,8 @@ export const reduceSyncRoster = (state: State, ctx: Ctx, payload: { controllers:
     seen.add(c.id);
     const existing = players[c.id];
     if (existing) {
-      if (existing.name !== c.name || existing.connected !== c.connected) {
-        players[c.id] = { ...existing, name: c.name, connected: c.connected };
+      if (existing.name !== c.name || existing.connected !== c.connected || !!existing.local !== !!c.local) {
+        players[c.id] = { ...existing, name: c.name, connected: c.connected, local: c.local };
       }
       continue;
     }
@@ -174,6 +180,7 @@ export const reduceSyncRoster = (state: State, ctx: Ctx, payload: { controllers:
       team: slot % 2,
       connected: c.connected,
       stageVote: null,
+      ...(c.local ? { local: true } : {}),
     };
   }
   for (const p of Object.values(players)) {
@@ -186,8 +193,8 @@ export const reduceSyncRoster = (state: State, ctx: Ctx, payload: { controllers:
   return withAutoStart(ensureBots({ ...state, players }));
 };
 
-export const reduceSetFighter = (state: State, ctx: Ctx, payload: { fighterId: FighterId }): State => {
-  const player = state.players[ctx.actorId];
+export const reduceSetFighter = (state: State, ctx: Ctx, payload: { fighterId: FighterId; playerId?: string }): State => {
+  const player = state.players[actorOf(state, ctx, payload)];
   if (!player || player.isBot || !FIGHTER_IDS.includes(payload.fighterId)) return state;
   if (state.matchPhase === "countdown" || state.matchPhase === "playing") return state;
   if (state.matchPhase === "lobby" && player.ready) return state;
@@ -195,24 +202,24 @@ export const reduceSetFighter = (state: State, ctx: Ctx, payload: { fighterId: F
   return { ...state, players: { ...state.players, [player.id]: { ...player, fighterId: payload.fighterId } } };
 };
 
-export const reduceSetReady = (state: State, ctx: Ctx, payload: { ready: boolean }): State => {
+export const reduceSetReady = (state: State, ctx: Ctx, payload: { ready: boolean; playerId?: string }): State => {
   if (state.matchPhase !== "lobby") return state;
-  const player = state.players[ctx.actorId];
+  const player = state.players[actorOf(state, ctx, payload)];
   if (!player || player.isBot || player.ready === payload.ready) return state;
   return withAutoStart({ ...state, players: { ...state.players, [player.id]: { ...player, ready: payload.ready } } });
 };
 
-export const reduceSetTeam = (state: State, ctx: Ctx, payload: { team: number }): State => {
+export const reduceSetTeam = (state: State, ctx: Ctx, payload: { team: number; playerId?: string }): State => {
   if (state.matchPhase !== "lobby") return state;
-  const player = state.players[ctx.actorId];
+  const player = state.players[actorOf(state, ctx, payload)];
   if (!player || player.isBot || player.ready) return state;
   const team = payload.team === 1 ? 1 : 0;
   if (player.team === team) return state;
   return { ...state, players: { ...state.players, [player.id]: { ...player, team } } };
 };
 
-export const reduceVoteStage = (state: State, ctx: Ctx, payload: { stage: StageId | null }): State => {
-  const player = state.players[ctx.actorId];
+export const reduceVoteStage = (state: State, ctx: Ctx, payload: { stage: StageId | null; playerId?: string }): State => {
+  const player = state.players[actorOf(state, ctx, payload)];
   if (!player || player.isBot) return state;
   if (state.matchPhase === "countdown" || state.matchPhase === "playing") return state;
   const stage = payload.stage && STAGE_IDS.includes(payload.stage) ? payload.stage : null;

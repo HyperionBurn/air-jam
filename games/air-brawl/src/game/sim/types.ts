@@ -34,6 +34,11 @@ export interface InputFrame {
   held: number;
   /** Buttons pressed since the previous tick (tap-safe, survives fast taps). */
   taps: number;
+  /**
+   * Right-stick smash flick that began this tick: 0 none, 1 right, 2 left, 3 up, 4 down.
+   * Counts as a perfect stick flick plus an attack press (gamepads have no touch-stick flick).
+   */
+  flick?: number;
 }
 
 export const NEUTRAL_INPUT: Readonly<InputFrame> = Object.freeze({

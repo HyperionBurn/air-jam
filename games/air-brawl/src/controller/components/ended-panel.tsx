@@ -67,7 +67,7 @@ export const EndedPanel = ({ me }: { me: PlayerEntry }) => {
       </div>
 
       <div className="space-y-2 border-t border-white/10 bg-[#070b18]/95 p-3">
-        <BigButton color="#34d399" onClick={() => void actions.rematch()}>
+        <BigButton padReady color="#34d399" onClick={() => void actions.rematch()}>
           Rematch{seconds !== null ? ` · ${seconds}` : ""}
         </BigButton>
         <div className="grid grid-cols-2 gap-2">
