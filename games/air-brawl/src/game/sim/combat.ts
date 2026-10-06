@@ -9,6 +9,7 @@ import {
   KB_DECEL_X,
   KB_GRAVITY_MUL,
   KB_SPEED,
+  PERFECT_SHIELD_FRAMES,
   POWER_DAMAGE_MUL,
   POWER_KB_MUL,
   PRIORITY_CLANK,
@@ -16,6 +17,9 @@ import {
   SHIELD_PUSHBACK,
   SHIELD_STUN_BASE,
   SHIELD_STUN_PER_DAMAGE,
+  STALE_MIN,
+  STALE_QUEUE,
+  STALE_STEP,
   TUMBLE_KB,
 } from "./constants";
 import { clearBuffers } from "./input";
@@ -64,6 +68,25 @@ export interface HitContext {
   /** Attacker takes hitlag too (melee) */
   attackerLag?: boolean;
 }
+
+/** How stale `moveId` is for this attacker right now: 1 = fresh, STALE_MIN = fully stale. */
+export const staleMultiplier = (attacker: Fighter | null, moveId: string): number => {
+  if (!attacker || attacker.staleQueue.length === 0) return 1;
+  let copies = 0;
+  for (const m of attacker.staleQueue) if (m === moveId) copies += 1;
+  return Math.max(STALE_MIN, 1 - STALE_STEP * copies);
+};
+
+/** Record a landed move once per use (multi-hit moves count as one). */
+const noteLanded = (attacker: Fighter, moveId: string): void => {
+  if (attacker.staleUse === attacker.moveUse) return;
+  attacker.staleUse = attacker.moveUse;
+  attacker.staleQueue.push(moveId);
+  if (attacker.staleQueue.length > STALE_QUEUE) attacker.staleQueue.shift();
+};
+
+/** Hazards and items hit with ids that are not a fighter's own moves; they never go stale. */
+const isEnvironmentMove = (moveId: string): boolean => moveId === "" || moveId.startsWith("hazard") || moveId.startsWith("item");
 
 export type HitOutcome = "hit" | "shield" | "armor" | "aegis" | "none";
 
@@ -153,8 +176,10 @@ export const applyHit = (
   if (!isTargetable(target)) return "none";
   if (target.invuln > 0) return "none";
   const attacker = ctx.attacker >= 0 ? world.fighters[ctx.attacker] : null;
-  const dmgMul = (ctx.dmgMul ?? 1) * (attacker && attacker.buffPower > 0 ? POWER_DAMAGE_MUL : 1);
-  const kbMul = (ctx.kbMul ?? 1) * (attacker && attacker.buffPower > 0 ? POWER_KB_MUL : 1);
+  const fresh = attacker && !isEnvironmentMove(ctx.moveId) ? staleMultiplier(attacker, ctx.moveId) : 1;
+  const dmgMul = (ctx.dmgMul ?? 1) * fresh * (attacker && attacker.buffPower > 0 ? POWER_DAMAGE_MUL : 1);
+  // Knockback goes stale at a third of the damage rate, so a stale kill move still kills, a bit later.
+  const kbMul = (ctx.kbMul ?? 1) * (0.7 + 0.3 * fresh) * (attacker && attacker.buffPower > 0 ? POWER_KB_MUL : 1);
   const damage = data.damage * dmgMul;
 
   // Aegis pickup: absorbs a few hits entirely.
@@ -164,6 +189,20 @@ export const applyHit = (
     emit(world, { type: "shieldHit", attacker: ctx.attacker, victim: target.index, x: ctx.x, y: ctx.y, damage });
     if (attacker && ctx.attackerLag) attacker.hitlag = Math.max(attacker.hitlag, 5);
     return "aegis";
+  }
+
+  // Parry: a shield raised just in time takes nothing, is not stunned, and the attacker is punished.
+  if (target.state === "shield" && target.shieldFresh && target.sf <= PERFECT_SHIELD_FRAMES && target.hitlag === 0) {
+    const parryLag = Math.max(12, Math.floor(hitlagFor(damage, data.hitlag ?? 1) * 1.6));
+    emit(world, { type: "parry", attacker: ctx.attacker, victim: target.index, x: ctx.x, y: ctx.y });
+    target.shieldRegenDelay = 20;
+    target.shield = Math.min(target.def.shieldMax, target.shield + 6);
+    target.hitlag = Math.min(6, parryLag);
+    if (attacker && ctx.attackerLag) {
+      attacker.hitlag = parryLag;
+      if (attacker.grounded) attacker.vx = -ctx.dirSign * SHIELD_PUSHBACK * 1.8;
+    }
+    return "shield";
   }
 
   // Shield.
@@ -192,6 +231,7 @@ export const applyHit = (
 
   // Normal hit.
   target.percent = Math.min(999, target.percent + damage);
+  if (attacker && !isEnvironmentMove(ctx.moveId)) noteLanded(attacker, ctx.moveId);
   if (attacker) {
     world.stats[attacker.index].damageDealt += damage;
     world.stats[attacker.index].moveHits[ctx.moveId] = (world.stats[attacker.index].moveHits[ctx.moveId] ?? 0) + 1;
@@ -302,6 +342,7 @@ export const applyHit = (
     sfx: data.sfx,
     lag,
     killing,
+    stale: fresh >= 1 ? 0 : (1 - fresh) / (1 - STALE_MIN),
   });
   return "hit";
 };

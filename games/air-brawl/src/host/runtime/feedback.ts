@@ -67,13 +67,26 @@ export class FeedbackRouter {
         break;
       case "hit": {
         const heavy = e.kb >= 95 || e.killing;
+        const stale = e.stale ?? 0;
         const id: AirBrawlSoundId = e.kb >= 130 ? "hitMega" : e.kb >= 80 ? "hitHeavy" : e.kb >= 42 ? "hitMid" : "hitLight";
-        this.play(id, { pitch: this.vary(), cooldown: 30 });
+        // Stale hits sound thin: lower, quieter. A fresh, varied hit has the full thump.
+        this.play(id, { pitch: this.vary() * (1 - 0.14 * stale), volume: 1 - 0.4 * stale, cooldown: 30 });
         if (e.killing) this.play("crowd", { cooldown: 500, volume: 0.5 });
         this.buzz(world, e.victim, heavy ? "heavy" : "medium", 80);
-        if (e.attacker >= 0) this.buzz(world, e.attacker, "light", 90);
+        // The attacker feels a crisp tick for a fresh hit and nothing for a stale one.
+        if (e.attacker >= 0 && stale < 0.45) this.buzz(world, e.attacker, "light", 90);
         break;
       }
+      case "parry":
+        this.play("clash", { pitch: 1.45, volume: 1, cooldown: 60 });
+        this.play("shield", { pitch: 1.7, volume: 0.7, cooldown: 60 });
+        this.buzz(world, e.victim, "success");
+        this.buzz(world, e.attacker, "failure");
+        break;
+      case "denied":
+        // The press did nothing, and the player should know it: a short dull tick on their phone.
+        this.buzz(world, e.who, "light", 160);
+        break;
       case "shieldHit":
         this.play("shield", { pitch: this.vary() });
         this.buzz(world, e.victim, "medium");

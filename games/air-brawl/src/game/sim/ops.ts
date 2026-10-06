@@ -1,5 +1,6 @@
 import { FIGHTERS } from "../data/fighters";
 import { ITEM_THROW } from "../data/items";
+import { SHIELD_RELEASE_LOCK } from "./constants";
 import type {
   Facing,
   Fighter,
@@ -43,6 +44,16 @@ export const createFighter = (entry: RosterEntry, index: number, stocks: number)
     fastFall: false,
     helpless: false,
     airDodgeUsed: false,
+    staleQueue: [],
+    moveUse: 0,
+    staleUse: -1,
+    dodgeFatigue: 0,
+    dodgeTimer: 0,
+    shieldLock: 0,
+    shieldFresh: false,
+    dodgeScale: 1,
+    dodgeLag: 0,
+    moveCd: {},
     landLock: 0,
     percent: 0,
     stocks,
@@ -105,6 +116,8 @@ export const createFighter = (entry: RosterEntry, index: number, stocks: number)
 };
 
 export const setState = (f: Fighter, state: StateName): void => {
+  // Lowering the shield (for any reason) locks it for a moment: no mashing a permanent parry window.
+  if (f.state === "shield" && state !== "shield") f.shieldLock = SHIELD_RELEASE_LOCK;
   f.state = state;
   f.sf = 0;
 };
@@ -192,6 +205,13 @@ export const resetFighterBody = (f: Fighter): void => {
   f.helpless = false;
   f.fastFall = false;
   f.airDodgeUsed = false;
+  // A KO resets the stale queue and fatigue: a fresh stock is a fresh start.
+  f.staleQueue.length = 0;
+  f.dodgeFatigue = 0;
+  f.dodgeTimer = 0;
+  f.shieldLock = 0;
+  f.shieldFresh = false;
+  for (const key of Object.keys(f.moveCd)) delete f.moveCd[key];
   f.jumpsLeft = f.def.airJumps;
   f.jumpCut = false;
   f.shield = f.def.shieldMax;

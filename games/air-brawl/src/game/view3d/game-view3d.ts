@@ -13,6 +13,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   OctahedronGeometry,
   PCFSoftShadowMap,
   PerspectiveCamera,
@@ -55,6 +56,12 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
 };
 
 const FOV = 32;
+/** Pixels rendered per quality level (0 = full). The governor walks down this list. */
+const PIXEL_BUDGET = [3.2e6, 2.1e6, 1.7e6, 1.5e6, 1.1e6];
+/** One 60 Hz refresh is 16.7 ms; beyond this the match feels heavy and inputs land late. */
+const SLOW_FRAME_MS = 19.5;
+/** Comfortable headroom: a long stretch below this earns a level back. */
+const FAST_FRAME_MS = 11;
 const FX_COLOR: Record<HitFx, number> = {
   impact: 0xffffff,
   slash: 0xbfe9ff,
@@ -200,7 +207,11 @@ export class GameView3D {
   /** Adaptive quality: 0 = full ... 4 = lowest. Only ever steps down when frames run long. */
   private quality = 0;
   private slowStreak = 0;
+  private fastStreak = 0;
   private emaMs = 16.7;
+  /** Materials and shader variants are compiled once per world, during the countdown, not mid-fight. */
+  private warmed = false;
+  private anchors: Group | null = null;
   private forcedLow = false;
   /** `?quality=N` pins the adaptive level (profiling / screenshots). */
   private pinnedQuality: number | null = (() => {
@@ -279,6 +290,11 @@ export class GameView3D {
   }
 
   /** Renderer counters for profiling (draw calls / triangles per frame, live resources). */
+  /** Names of the compiled shader programs (profiling: spot variants compiled mid-match). */
+  programNames(): string[] {
+    return (this.renderer.info.programs ?? []).map((p) => `${p.id}:${String((p as unknown as { cacheKey?: string }).cacheKey ?? p.name).slice(0, 140)}`);
+  }
+
   stats(): Record<string, number> {
     const info = this.renderer.info;
     const count = (root: Group | null): { meshes: number; tris: number } => {
@@ -362,14 +378,17 @@ export class GameView3D {
   private applyQuality(): void {
     const level = this.qualityLevel;
     const dpr = window.devicePixelRatio || 1;
-    const pr = level >= 4 ? 0.75 : level >= 1 ? Math.min(dpr, 1.25) : Math.min(dpr, 1.75);
+    // Each step renders fewer pixels: a pixel budget per level, capped by the screen's own density.
+    const budget = PIXEL_BUDGET[Math.min(level, PIXEL_BUDGET.length - 1)];
+    const pr = Math.max(0.5, Math.min(dpr, 1.75, Math.sqrt(budget / Math.max(1, this.sizeW * this.sizeH))));
     if (Math.abs(this.renderer.getPixelRatio() - pr) > 0.01) {
       this.renderer.setPixelRatio(pr);
       this.renderer.setSize(this.sizeW, this.sizeH, false);
       this.post.setSize(this.sizeW * pr, this.sizeH * pr);
     }
-    this.post.setEffects(level >= 2);
-    this.stage?.setShadows(level < 3);
+    this.post.setMsaa(level === 0 ? 4 : level === 1 ? 2 : 0);
+    this.post.setEffects(level >= 3);
+    this.stage?.setShadows(level < 4);
     this.stage?.setDetail(level);
     for (const m of this.models) m.setDetail(level);
   }
@@ -385,11 +404,22 @@ export class GameView3D {
     }
     const dt = Math.min(dtMs, 250);
     this.emaMs += (dt - this.emaMs) * 0.2;
-    if (this.emaMs > 26) this.slowStreak += dt;
+    // A fighting game has to hold 60: step down as soon as frames run longer than one 60 Hz refresh
+    // plus a little slack, rather than waiting for a visibly bad 40 fps.
+    if (this.emaMs > SLOW_FRAME_MS) this.slowStreak += dt;
     else this.slowStreak = Math.max(0, this.slowStreak - dt * 2);
-    if (this.slowStreak > 1500 && this.quality < 4) {
+    // ...and take a level back after a long stretch of ample headroom (a 120/144 Hz display or a big GPU).
+    if (this.emaMs < FAST_FRAME_MS) this.fastStreak += dt;
+    else this.fastStreak = 0;
+    if (this.slowStreak > 800 && this.quality < 4) {
       this.quality += 1;
       this.slowStreak = 0;
+      this.fastStreak = 0;
+      this.emaMs = 16.7;
+      this.applyQuality();
+    } else if (this.fastStreak > 12000 && this.quality > 0) {
+      this.quality -= 1;
+      this.fastStreak = 0;
       this.emaMs = 16.7;
       this.applyQuality();
     }
@@ -400,6 +430,11 @@ export class GameView3D {
   setWorld(world: World): void {
     this.reset();
     this.lastWorld = world;
+    this.warmed = false;
+    if (this.anchors) {
+      this.scene.remove(this.anchors);
+      this.anchors = null;
+    }
     this.stageId = world.stage.id;
     this.stage = buildStage(world.stage);
     this.scene.add(this.stage.group);
@@ -530,8 +565,11 @@ export class GameView3D {
     const fx = this.fx;
     switch (e.type) {
       case "hit": {
-        const power = Math.min(1.6, e.kb / 95 + e.damage / 24);
-        const attackerColor = e.attacker >= 0 ? color(e.attacker) : "#ffb347";
+        const stale = e.stale ?? 0;
+        // A stale move lands weaker and duller, so repeating it is visibly worse than varying.
+        const power = Math.min(1.6, e.kb / 95 + e.damage / 24) * (1 - 0.3 * stale);
+        const attackerColor = stale > 0.45 ? "#98a2b3" : e.attacker >= 0 ? color(e.attacker) : "#ffb347";
+        if (stale > 0.45 && e.attacker >= 0) this.hud.callout(e.x, e.y + 60, "STALE", "#aab4c5", { size: 30, hold: 22 });
         fx.hit(e.x, e.y, power, e.dx || 1, e.dy, attackerColor, e.fx);
         this.camera.shake(Math.min(26, 2 + power * 11), e.dx || 1, e.dy);
         if (power > 0.9) {
@@ -550,6 +588,13 @@ export class GameView3D {
       case "shieldHit":
         fx.shieldHit(e.x, e.y, color(e.victim));
         this.camera.shake(3);
+        break;
+      case "parry":
+        fx.clash(e.x, e.y);
+        fx.shieldHit(e.x, e.y, color(e.victim));
+        this.camera.shake(9);
+        this.hud.flash(0xdff6ff, 0.22);
+        this.hud.callout(e.x, e.y + 70, "PARRY!", "#8be9ff", { size: 52, hold: 28 });
         break;
       case "shieldBreak":
         fx.shieldBreak(e.x, e.y);
@@ -707,13 +752,59 @@ export class GameView3D {
     this.fx.update(dtFrames);
     this.hud.update(world, this.projector, w, h, dtFrames, { ...hudOptions, uiScale: this.settings.uiScale });
 
+    if (!this.warmed) this.prewarm();
     this.post.setImpact(this.hitMomentum * 0.0035 + this.koFlash * 0.004, 0, [1, 1, 1], this.koBlur, this.koX, this.koY);
     this.post.setVignette(world.phase === "finishing" ? 0.55 : this.baseVignette);
     this.post.render(dtMs / 1000);
     this.overlay.renderer.render(this.overlay.stage);
     (window as unknown as { __airBrawlStats?: () => unknown }).__airBrawlStats = () => this.stats();
+    (window as unknown as { __airBrawlPrograms?: () => string[] }).__airBrawlPrograms = () => this.programNames();
     this.frameCounter += 1;
     this.lastRenderMs = performance.now() - start;
+  }
+
+  /**
+   * Compile every shader variant the match can need, once, while the countdown covers it.
+   * Before this, the first KO, the first shield, the first ghosted respawn and the first item each
+   * compiled a program mid-fight: a 100-800 ms freeze that eats inputs (the "lag spike").
+   * Everything hidden is shown for one off-screen frame (the effects pool and ghosted fighters
+   * included) and put back exactly as it was.
+   */
+  private prewarm(): void {
+    this.warmed = true;
+    const hidden: Object3D[] = [];
+    this.scene.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    // Ghosting (respawn, invulnerable, vanish) flips a material to transparent, which is a different
+    // shader program. A program nobody currently uses is deleted by three, so the first ghost after
+    // an all-opaque stretch recompiled it mid-fight. Anchor meshes keep every ghost variant alive.
+    if (!this.anchors) {
+      this.anchors = new Group();
+      const tiny = new PlaneGeometry(0.01, 0.01);
+      for (const m of this.models) {
+        for (const mat of m.warmMaterials()) {
+          const ghost = mat.clone();
+          ghost.transparent = true;
+          ghost.opacity = 0.5;
+          const mesh = new Mesh(tiny, ghost);
+          mesh.frustumCulled = false;
+          this.anchors.add(mesh);
+        }
+      }
+      this.scene.add(this.anchors);
+      hidden.push(this.anchors);
+      this.anchors.visible = true;
+    }
+    try {
+      this.renderer.compile(this.scene, this.cam);
+      this.post.render(0);
+    } finally {
+      for (const o of hidden) o.visible = false;
+    }
   }
 
   private placeCamera(w: number, h: number): void {

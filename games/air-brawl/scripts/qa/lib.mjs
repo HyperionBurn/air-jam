@@ -19,7 +19,10 @@ fs.mkdirSync(OUT, { recursive: true });
 export const launch = () =>
   chromium.launch({
     executablePath: process.env.AIRBRAWL_CHROME || undefined,
-    args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl"],
+    // AIRBRAWL_GPU=1 uses the machine's real GPU (needed for any frame-time number to mean anything).
+    args: process.env.AIRBRAWL_GPU
+      ? ["--ignore-gpu-blocklist", "--enable-webgl", "--use-angle=d3d11", "--autoplay-policy=no-user-gesture-required"]
+      : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl"],
   });
 
 export const shot = async (ctx, page, name, clip, scale = 1) => {
@@ -56,7 +59,7 @@ export const startMatch = async (browser, { bots = 3, stage, preset, viewport = 
   await phone.goto(`${BASE}/controller?room=${room}`, { waitUntil: "domcontentloaded" });
   await sleep(4500);
   if (preset) await phone.getByText(preset).first().click({ timeout: 10000 });
-  await phone.getByText("Show all options").click({ timeout: 10000 });
+  await phone.getByText("Show all options").click({ timeout: 30000 });
   await phone.locator("text=CPU fighters").locator("xpath=following-sibling::*").getByText(String(bots), { exact: true }).click({ timeout: 8000 });
   if (stage) await phone.getByRole("button", { name: stage }).first().click({ timeout: 8000 }).catch(() => {});
   await phone.getByRole("button", { name: /ready/i }).first().click();

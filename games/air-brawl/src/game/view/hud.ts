@@ -63,6 +63,16 @@ interface EdgeMarker {
   label: Text;
 }
 
+/** Short text that rises from a point in the world: PARRY!, STALE, and similar skill feedback. */
+interface Callout {
+  text: Text;
+  wx: number;
+  wy: number;
+  age: number;
+  hold: number;
+  size: number;
+}
+
 interface Announcement {
   text: Text;
   age: number;
@@ -89,6 +99,7 @@ export class HudView {
   private readonly tagLayer = new Container();
   private readonly announceLayer = new Container();
   private announcements: Announcement[] = [];
+  private callouts: Callout[] = [];
   private readonly timerText = text("", { fontSize: 46 });
   private readonly timerSub = text("", { fontSize: 18, fill: "#cfe0ff" });
   private flashOverlay = new Graphics();
@@ -185,6 +196,24 @@ export class HudView {
     this.announcements.push({ text: label, age: 0, hold: options.hold ?? 40, base: options.size ?? 140, pop: 0 });
   }
 
+  /** Floating text at a world position. Capped so a brawl never buries the screen in labels. */
+  callout(wx: number, wy: number, message: string, color = "#ffffff", options: { size?: number; hold?: number } = {}): void {
+    const size = options.size ?? 40;
+    if (this.callouts.length >= 8) {
+      const oldest = this.callouts.shift();
+      oldest?.text.destroy();
+    }
+    const label = text(message, {
+      fontSize: size,
+      fill: color,
+      stroke: { color: "#05070f", width: Math.max(5, size * 0.14), join: "round" },
+    });
+    label.anchor.set(0.5);
+    label.alpha = 0;
+    this.announceLayer.addChild(label);
+    this.callouts.push({ text: label, wx, wy, age: 0, hold: options.hold ?? 30, size });
+  }
+
   flash(color: number, alpha: number): void {
     this.flashColor = color;
     this.flashAlpha = Math.max(this.flashAlpha, alpha);
@@ -211,6 +240,8 @@ export class HudView {
     this.edges.clear();
     for (const a of this.announcements) a.text.destroy();
     this.announcements = [];
+    for (const c of this.callouts) c.text.destroy();
+    this.callouts = [];
     this.timerText.visible = false;
     this.timerSub.visible = false;
   }
@@ -246,6 +277,7 @@ export class HudView {
     this.updateTags(world, camera, viewW, viewH, scale, opts);
     this.updateTimer(world, viewW, scale, opts);
     this.updateAnnouncements(viewW, viewH, dtFrames, scale);
+    this.updateCallouts(camera, viewW, viewH, scale, dtFrames);
 
     this.flashAlpha = Math.max(0, this.flashAlpha - 0.045 * dtFrames);
     this.flashOverlay.alpha = this.flashAlpha;
@@ -478,6 +510,24 @@ export class HudView {
     this.timerSub.style.fontSize = 15 * scale;
     this.timerSub.position.set(viewW / 2, 14 * scale + 52 * scale);
     this.timerSub.visible = true;
+  }
+
+  private updateCallouts(camera: ScreenCamera, viewW: number, viewH: number, scale: number, dtFrames: number): void {
+    for (let i = this.callouts.length - 1; i >= 0; i -= 1) {
+      const c = this.callouts[i];
+      c.age += dtFrames;
+      const popIn = Math.min(1, c.age / 6);
+      const out = c.age > c.hold ? Math.min(1, (c.age - c.hold) / 10) : 0;
+      const p = camera.toScreen(c.wx, c.wy, viewW, viewH);
+      const rise = Math.min(1, c.age / (c.hold + 10)) * 46 * scale;
+      c.text.position.set(p.x, p.y - rise);
+      c.text.alpha = (1 - out) * Math.min(1, c.age / 3);
+      c.text.scale.set((0.6 + 0.4 * popIn) * (1 + Math.sin(popIn * Math.PI) * 0.18) * scale * Math.max(0.8, Math.min(1.3, camera.scale * 1.4)));
+      if (out >= 1) {
+        c.text.destroy();
+        this.callouts.splice(i, 1);
+      }
+    }
   }
 
   private updateAnnouncements(viewW: number, viewH: number, dtFrames: number, scale: number): void {

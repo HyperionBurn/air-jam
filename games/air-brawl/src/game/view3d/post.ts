@@ -80,6 +80,18 @@ export class PostStack {
     this.composer.setSize(width, height);
   }
 
+  /**
+   * Multisampling of the scene target (4 = full, 0 = off). A 4x half-float target is the single biggest
+   * fill cost on an integrated GPU, so the quality governor steps it down first.
+   */
+  setMsaa(samples: number): void {
+    for (const target of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      if (target.samples === samples) continue;
+      target.samples = samples;
+      target.dispose();
+    }
+  }
+
   /** Apply a stage's authored grade and bloom character. */
   setLook(look: { bloom: { strength: number; radius: number; threshold: number }; grade: { saturation: number; contrast: number; tint: [number, number, number]; lift: [number, number, number]; vignette: number } }): void {
     this.bloom.strength = look.bloom.strength;

@@ -89,6 +89,28 @@ export const POWER_KB_MUL = 1.18;
 export const SURGE_SPEED_MUL = 1.28;
 export const AEGIS_FRAMES = 420;
 
+/**
+ * Anti-spam and skill.
+ *
+ * Move staling: every landed move goes into the attacker's queue of the last STALE_QUEUE moves;
+ * each copy of the same move already in the queue costs STALE_STEP of its damage (never below
+ * STALE_MIN) and a third of that of its knockback. Mixing moves keeps them fresh.
+ */
+export const STALE_QUEUE = 9;
+export const STALE_STEP = 0.085;
+export const STALE_MIN = 0.55;
+/** A shield raised into an incoming hit within this many frames is a parry: no shield damage, no stun. */
+export const PERFECT_SHIELD_FRAMES = 5;
+/** After lowering the shield it cannot be raised again for this long: no mashing a permanent parry window. */
+export const SHIELD_RELEASE_LOCK = 12;
+/** Dodges used within this window of each other get weaker (shorter invulnerability) and slower to recover. */
+export const DODGE_FATIGUE_WINDOW = 80;
+export const DODGE_FATIGUE_STEP = 0.28;
+export const DODGE_FATIGUE_MIN = 0.3;
+export const DODGE_FATIGUE_LAG = 5;
+/** Projectile specials (anything that spawns) cannot be restarted until this long after they began. */
+export const PROJECTILE_RECAST = 16;
+
 /** Misc */
 export const MAX_SUBSTEP = 10;
 export const MAX_PROJECTILES = 40;

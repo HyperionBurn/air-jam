@@ -476,6 +476,23 @@ export interface Fighter {
   fastFall: boolean;
   helpless: boolean;
   airDodgeUsed: boolean;
+  /** Last landed moves (newest last), for move staling. */
+  staleQueue: string[];
+  /** Unique id of the current move use, and the use that was already added to the queue. */
+  moveUse: number;
+  staleUse: number;
+  /** Dodges used recently, and frames until that count resets. */
+  dodgeFatigue: number;
+  dodgeTimer: number;
+  /** Frames before the shield can be raised again after it was lowered. */
+  shieldLock: number;
+  /** True when the current shield was raised fresh (parry window available). */
+  shieldFresh: boolean;
+  /** Invulnerability scale and extra recovery for the dodge in progress (dodge fatigue). */
+  dodgeScale: number;
+  dodgeLag: number;
+  /** Per-move recast timers (frames), for projectile specials. */
+  moveCd: Record<string, number>;
   /** Frames of landing lock remaining in the `land` state. */
   landLock: number;
 
@@ -579,7 +596,11 @@ export type SimEvent =
       sfx: SfxWeight;
       lag: number;
       killing: boolean;
+      /** 0 = fresh, up to 1 = fully stale (the move was repeated). */
+      stale?: number;
     }
+  | { type: "parry"; attacker: number; victim: number; x: number; y: number }
+  | { type: "denied"; who: number; why: "recast" | "shield" }
   | { type: "shieldHit"; attacker: number; victim: number; x: number; y: number; damage: number }
   | { type: "shieldBreak"; victim: number; x: number; y: number }
   | { type: "clash"; a: number; b: number; x: number; y: number }

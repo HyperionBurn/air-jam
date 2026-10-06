@@ -45,6 +45,25 @@ where your thumb lands. Right side: five large pads.
 Down on the stick falls faster; tapping down on a thin platform drops through.
 Haptics confirm hits, KOs, shield breaks and respawns (can be turned off per phone).
 
+## Skill, not spam
+
+Mashing a button should lose to playing well. These rules are in the sim (`src/game/sim`, tests in `tests/skill.test.ts`):
+
+- **Move staling.** Each landed move goes into your last-9 queue. Every copy of the same move already in it costs 8.5% damage (floor 55%) and a third of that in knockback. Mix moves and they stay fresh; a KO resets the queue. Stale hits show a grey spark, a thin sound and a `STALE` tag, and the attacker's phone stops buzzing.
+- **Parry.** A shield raised in the 5 frames before a hit takes no damage and no stun, punishes the attacker with extra hitlag and pushback, and shows `PARRY!` with a distinct sound and haptic.
+- **No shield mashing.** After lowering the shield it cannot be raised again for 12 frames, so you cannot hold a permanent parry window by tapping. A refused press gives a short dull haptic tick.
+- **Dodge fatigue.** Spot dodges, rolls and air dodges used within 80 frames of each other lose 28% of their invulnerability each time (floor 30%) and recover 5 frames slower. One well-timed dodge is untouched.
+- **Projectile recast.** A move that spawns a projectile cannot restart until 16 frames after it ends. A refused press gives the same haptic tick.
+
+## Performance
+
+A fighting game has to hold 60 fps. The host renderer (`src/game/view3d`) therefore:
+
+- steps a quality governor down after 0.8 s above 19.5 ms per frame (and back up after 12 s below 11 ms): MSAA 4x, then 2x, then off, with a pixel budget per level, then bloom, then shadows;
+- compiles every shader variant, including ghost/respawn variants, once at match start (`prewarm`) and keeps them alive with anchor meshes, so the first KO or respawn no longer freezes the game for 100-800 ms.
+
+Measure with `AIRBRAWL_GPU=1 AIRBRAWL_CHROME=<chrome.exe> node scripts/qa/perf-frames.mjs` (8 fighters, 1080p; reports fps, percentiles and mid-match shader compiles) and `perf-profile.mjs` (CPU profile). On an integrated GPU this took the 8-fighter match from 42 fps (p99 97 ms, worst 786 ms) to 60 fps (p99 23 ms, worst 34 ms).
+
 ## Controls (Xbox / PlayStation / Switch pads)
 
 Any standard-mapping gamepad works. Plug it into (or pair it with) the machine showing the game and

@@ -907,6 +907,11 @@ export class FighterModel {
 
   /* ----------------------------------------------------------------- UPDATE */
 
+  /** The materials that can flip to a ghost/transparent variant mid-match (pre-compiled at match start). */
+  warmMaterials(): MeshStandardMaterial[] {
+    return this.mats;
+  }
+
   /** Quality hook: hide fine geometry at low settings. */
   setDetail(level: number): void {
     this.detail.visible = level < 2;

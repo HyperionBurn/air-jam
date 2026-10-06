@@ -2,6 +2,11 @@ import { ITEM_THROW } from "../data/items";
 import {
   AIR_DODGE_FRAMES,
   AIR_DODGE_INVULN,
+  DODGE_FATIGUE_LAG,
+  DODGE_FATIGUE_MIN,
+  DODGE_FATIGUE_STEP,
+  DODGE_FATIGUE_WINDOW,
+  PROJECTILE_RECAST,
   BOUNCE_SPEED,
   DIR_THRESHOLD,
   DOWN_HOLD_DROP,
@@ -87,6 +92,14 @@ export const startMove = (world: World, f: Fighter, id: string, keepMomentum = f
   const airborne = !f.grounded;
   const move = id === ITEM_THROW.id ? ITEM_THROW : resolveMove(f, id, airborne);
   if (!move) return false;
+  // Projectile specials cannot be restarted at once: mashing Special is a stream of weak, stale bolts, not a wall.
+  const projectile = (move.spawns?.length ?? 0) > 0;
+  if (projectile && (f.moveCd[move.id] ?? 0) > 0) {
+    emit(world, { type: "denied", who: f.index, why: "recast" });
+    return false;
+  }
+  f.moveUse += 1;
+  if (projectile) f.moveCd[move.id] = move.total + PROJECTILE_RECAST;
   f.moveId = move.id;
   f.sf = 0;
   f.hitLog.length = 0;
@@ -118,10 +131,24 @@ const startJumpsquat = (f: Fighter): void => {
   f.jumpCut = false;
 };
 
-const startShield = (f: Fighter): void => {
+const startShield = (f: Fighter, fresh = true): void => {
   setState(f, "shield");
+  f.shieldFresh = fresh;
   f.vx *= 0.5;
 };
+
+/**
+ * Dodge fatigue: dodges used close together are weaker (shorter invulnerability) and slower to
+ * recover from. A well-timed single dodge is untouched; chaining them is a gamble, not a wall.
+ */
+const beginDodge = (f: Fighter): void => {
+  f.dodgeScale = Math.max(DODGE_FATIGUE_MIN, 1 - DODGE_FATIGUE_STEP * f.dodgeFatigue);
+  f.dodgeLag = DODGE_FATIGUE_LAG * f.dodgeFatigue;
+  f.dodgeFatigue += 1;
+  f.dodgeTimer = DODGE_FATIGUE_WINDOW;
+};
+
+const dodgeInvuln = (f: Fighter, range: [number, number]): number => Math.max(2, Math.round((range[1] - range[0]) * f.dodgeScale));
 
 const trySelectGroundMove = (f: Fighter): string => {
   const dir = stickDir(f);
@@ -184,6 +211,12 @@ const tryGroundActions = (world: World, f: Fighter): boolean => {
     return true;
   }
   if (f.held & BTN.SHIELD) {
+    if (f.shieldLock > 0) {
+      // Still recovering from lowering the shield: the press is not buffered, it is simply too soon.
+      if (f.tapped & BTN.SHIELD) emit(world, { type: "denied", who: f.index, why: "shield" });
+      consumeShield(f);
+      return false;
+    }
     consumeShield(f);
     startShield(f);
     return true;
@@ -316,8 +349,9 @@ const handleAirActions = (world: World, f: Fighter): boolean => {
   }
   if (consumeShield(f) && !f.airDodgeUsed) {
     f.airDodgeUsed = true;
+    beginDodge(f);
     setState(f, "airDodge");
-    f.invuln = Math.max(f.invuln, AIR_DODGE_INVULN[1] - AIR_DODGE_INVULN[0]);
+    f.invuln = Math.max(f.invuln, dodgeInvuln(f, AIR_DODGE_INVULN));
     const mag = Math.hypot(f.stickX, f.stickY);
     const speed = f.def.airDodgeSpeed;
     f.vx = mag > 0.2 ? (f.stickX / mag) * speed : 0;
@@ -428,14 +462,14 @@ const updateAirDodge: Handler = (world, f) => {
   f.sf += 1;
   f.vx *= 0.9;
   f.vy *= 0.9;
-  if (f.sf === AIR_DODGE_INVULN[0]) f.invuln = Math.max(f.invuln, AIR_DODGE_INVULN[1] - AIR_DODGE_INVULN[0]);
+  if (f.sf === AIR_DODGE_INVULN[0]) f.invuln = Math.max(f.invuln, dodgeInvuln(f, AIR_DODGE_INVULN));
   const vyBefore = f.vy;
   const result = moveFighter(world, f);
   if (result.landed) {
-    landNormally(world, f, 4, vyBefore > 11);
+    landNormally(world, f, 4 + f.dodgeLag, vyBefore > 11);
     return;
   }
-  if (f.sf >= AIR_DODGE_FRAMES) setState(f, "airborne");
+  if (f.sf >= AIR_DODGE_FRAMES + f.dodgeLag) setState(f, "airborne");
 };
 
 /* ----------------------------------------------------------------- MOVES */
@@ -644,12 +678,14 @@ const updateShield: Handler = (world, f) => {
     return;
   }
   if (f.sf > 2 && flickedDown(f)) {
+    beginDodge(f);
     setState(f, "spotDodge");
     emit(world, { type: "dodge", who: f.index, x: f.x, y: f.y - f.def.height / 2, air: false });
     physicsGround(world, f);
     return;
   }
   if (f.sf > 2 && f.flickXAge <= 3 && f.flickXDir !== 0) {
+    beginDodge(f);
     setState(f, "roll");
     f.roll = f.flickXDir;
     emit(world, { type: "dodge", who: f.index, x: f.x, y: f.y - f.def.height / 2, air: false });
@@ -667,7 +703,7 @@ const updateShieldStun: Handler = (world, f) => {
   f.vx = approach(f.vx, 0, f.def.traction);
   f.hitstun -= 1;
   if (f.hitstun <= 0) {
-    if (f.held & BTN.SHIELD) startShield(f);
+    if (f.held & BTN.SHIELD) startShield(f, false);
     else setState(f, "idle");
   }
   physicsGround(world, f);
@@ -696,9 +732,9 @@ const updateRoll: Handler = (world, f) => {
   f.sf += 1;
   const t = clamp(f.sf / ROLL_FRAMES, 0, 1);
   f.vx = f.roll * f.def.rollSpeed * Math.sin(Math.PI * t) * 1.15;
-  if (f.sf === ROLL_INVULN[0]) f.invuln = Math.max(f.invuln, ROLL_INVULN[1] - ROLL_INVULN[0]);
+  if (f.sf === ROLL_INVULN[0]) f.invuln = Math.max(f.invuln, dodgeInvuln(f, ROLL_INVULN));
   physicsGround(world, f);
-  if (f.sf >= ROLL_FRAMES) {
+  if (f.sf >= ROLL_FRAMES + f.dodgeLag) {
     f.vx = 0;
     setState(f, "idle");
   }
@@ -707,9 +743,9 @@ const updateRoll: Handler = (world, f) => {
 const updateSpotDodge: Handler = (world, f) => {
   f.sf += 1;
   f.vx = approach(f.vx, 0, 2);
-  if (f.sf === SPOT_DODGE_INVULN[0]) f.invuln = Math.max(f.invuln, SPOT_DODGE_INVULN[1] - SPOT_DODGE_INVULN[0]);
+  if (f.sf === SPOT_DODGE_INVULN[0]) f.invuln = Math.max(f.invuln, dodgeInvuln(f, SPOT_DODGE_INVULN));
   physicsGround(world, f);
-  if (f.sf >= SPOT_DODGE_FRAMES) setState(f, "idle");
+  if (f.sf >= SPOT_DODGE_FRAMES + f.dodgeLag) setState(f, "idle");
 };
 
 /* ----------------------------------------------------------------- HITSTUN */
@@ -1128,6 +1164,12 @@ export const updateFighter = (world: World, f: Fighter, input: InputFrame): void
   if (f.invuln > 0 && f.state !== "respawn") f.invuln -= 1;
   if (f.dropThrough > 0) f.dropThrough -= 1;
   if (f.ledgeCooldown > 0) f.ledgeCooldown -= 1;
+  if (f.shieldLock > 0) f.shieldLock -= 1;
+  if (f.dodgeTimer > 0) {
+    f.dodgeTimer -= 1;
+    if (f.dodgeTimer === 0) f.dodgeFatigue = 0;
+  }
+  for (const key in f.moveCd) if (f.moveCd[key] > 0) f.moveCd[key] -= 1;
   if (f.buffPower > 0) f.buffPower -= 1;
   if (f.buffSpeed > 0) f.buffSpeed -= 1;
   if (f.buffAegis > 0) {
